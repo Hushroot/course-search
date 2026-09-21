@@ -1,0 +1,3 @@
+'use strict';
+const form=document.getElementById('loginForm'),btn=document.getElementById('loginBtn'),err=document.getElementById('error'),input=document.getElementById('code');
+form.addEventListener('submit',async e=>{e.preventDefault();err.textContent='';btn.disabled=true;btn.textContent='Checking…';try{const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:input.value})});const j=await r.json();if(!r.ok)throw new Error(j.error||'Login failed.');location.href='/app'}catch(e){err.textContent=e.message;btn.disabled=false;btn.textContent='Unlock course search'}});
