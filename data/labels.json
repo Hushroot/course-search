@@ -1,0 +1,40 @@
+{
+  "subjects": {
+    "9": "Arabic",
+    "10": "English",
+    "11": "French",
+    "12": "German",
+    "13": "Math & Mechanics",
+    "14": "Biology",
+    "15": "Geology",
+    "16": "Chemistry",
+    "17": "Physics",
+    "18": "URT — English & Science",
+    "21": "English",
+    "28": "Physics",
+    "34": "Accounting & Audit",
+    "35": "A2 Biology"
+  },
+  "teachers": {
+    "2": "Mohamed Hosny",
+    "3": "Mohamed Elsamalouti",
+    "6": "Rania Shahat",
+    "10": "Ahmed Nafea",
+    "11": "Mohamed Nagy",
+    "12": "Dr. Zeyad Alaa",
+    "13": "Dr. Baya Mohamed",
+    "14": "Nour Emam",
+    "17": "Dr. Saif Soliman",
+    "19": "Dr. Basuney Ragab",
+    "20": "Dr. Ahmed Mabrouk",
+    "21": "Eng. Nour Hamdy",
+    "24": "Dr. Sameh Waheed",
+    "26": "Dr. Ahmed AbdelSalam",
+    "30": "Dr. Abdallah Ahmed",
+    "38": "Dr. Abdelrahman Mohammed",
+    "40": "Dr. Ammar Elaref",
+    "45": "Dr. Sameh Samaha",
+    "23": "Mr. Taha El-Maraghy",
+    "42": "Dr. Ahmed Ameen"
+  }
+}
