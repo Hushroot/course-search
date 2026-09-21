@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Course Search — Admin</title>
+<link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<section class="admin-login" id="adminLogin">
+  <div class="auth-card">
+    <div class="auth-mark">A</div>
+    <div class="eyebrow">Administrator</div>
+    <h1>Admin access.</h1>
+    <p>Sign in with the server-side admin password to manage access codes.</p>
+    <form id="adminLoginForm">
+      <div class="field"><label for="password">Admin password</label><input class="input" id="password" type="password" autocomplete="current-password" autofocus></div>
+      <button class="btn primary block" id="adminLoginBtn" type="submit">Open admin panel</button>
+      <div class="error" id="adminLoginError"></div>
+    </form>
+    <div class="auth-footer"><a href="/">← Course login</a><span>Server-side authentication</span></div>
+  </div>
+</section>
+
+<main class="admin-shell hidden" id="adminPanel">
+  <header class="admin-head">
+    <div class="admin-title"><div class="eyebrow">Course Search</div><h1>Access control</h1><p>Manage access codes plus the names shown for every subject and teacher.</p></div>
+    <div class="admin-actions"><a class="btn small" href="/app">Open search</a><button class="btn small ghost" id="adminLogout">Log out</button></div>
+  </header>
+
+  <section class="panel">
+    <h2>Create an access code</h2><div class="panel-sub">Leave the custom-code field blank to generate a strong random code automatically.</div>
+    <form class="create-grid" id="createForm">
+      <div class="field wide"><label for="label">Label</label><input class="input" id="label" placeholder="Example: Grade 11 class"></div>
+      <div class="field"><label for="maxUses">Max logins</label><input class="input" id="maxUses" type="number" min="1" placeholder="Unlimited"></div>
+      <div class="field"><label for="expiresAt">Expires</label><input class="input" id="expiresAt" type="datetime-local"></div>
+      <div class="field"><label for="customCode">Custom code</label><input class="input" id="customCode" spellcheck="false" placeholder="Optional"></div>
+      <button class="btn primary" id="createBtn" type="submit">Create code</button>
+    </form>
+    <div class="error" id="createError"></div>
+    <div class="new-code" id="newCodeBox"><strong>New code — copy it now. The server does not store the plaintext.</strong><div class="code-box"><code id="newCode"></code><button class="btn small" id="copyCode" type="button">Copy</button></div></div>
+  </section>
+
+  <section class="stats-grid">
+    <div class="stat"><span>Total codes</span><strong id="statTotal">0</strong></div>
+    <div class="stat"><span>Active</span><strong id="statActive">0</strong></div>
+    <div class="stat"><span>Logins used</span><strong id="statUses">0</strong></div>
+    <div class="stat"><span>Expired / off</span><strong id="statOff">0</strong></div>
+  </section>
+
+  <section class="panel labels-panel">
+    <div class="panel-title-row">
+      <div><h2>Subject & teacher names</h2><div class="panel-sub">Readable names replace raw IDs in search, filters, and lesson groups. IDs are kept underneath so the data still matches correctly.</div></div>
+      <button class="btn primary small" id="saveLabels" type="button">Save names</button>
+    </div>
+    <div class="label-status" id="labelsSaved"></div>
+    <div class="error" id="labelsError"></div>
+    <div class="label-columns">
+      <div class="label-column">
+        <div class="label-column-head"><strong>Subjects</strong><span id="subjectNameCount">0 named</span></div>
+        <div class="label-list" id="subjectLabelRows"></div>
+      </div>
+      <div class="label-column">
+        <div class="label-column-head"><strong>Teachers</strong><span id="teacherNameCount">0 named</span></div>
+        <div class="label-list" id="teacherLabelRows"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Access codes</h2><div class="panel-sub">Only the final four characters are retained for identification. Full codes cannot be recovered.</div>
+    <div class="table-wrap">
+      <table class="table"><thead><tr><th>Label</th><th>Code</th><th>Status</th><th>Uses</th><th>Expires</th><th>Last used</th><th>Actions</th></tr></thead><tbody id="codeRows"></tbody></table>
+    </div>
+    <div class="error" id="tableError"></div>
+  </section>
+</main>
+<script src="/assets/admin.js" defer></script>
+</body>
+</html>

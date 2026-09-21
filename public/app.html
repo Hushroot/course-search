@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Course Search</title>
+<link rel="stylesheet" href="/assets/site.css?v=1.2">
+</head>
+<body>
+<div class="shell" id="appRoot">
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">S</div>
+      <div class="brand-copy"><h1>Course Search</h1><p>Private search across your course dataset.</p></div>
+    </div>
+    <div class="top-actions">
+      <div class="session-pill" id="sessionLabel">Private access</div>
+      <a class="btn small ghost hidden" id="adminLink" href="/admin">Admin</a>
+      <button class="btn small ghost" id="logoutBtn">Log out</button>
+    </div>
+  </header>
+
+  <section class="search-panel">
+    <div class="search-row">
+      <div class="search-box">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.4-3.4"/></svg>
+        <input id="q" autocomplete="off" placeholder="Search lessons, videos, topics, lesson ID, teacher ID…">
+        <button id="clear" title="Clear">×</button>
+      </div>
+      <div class="count-box"><strong id="matchCount">0</strong><span>matching lessons</span></div>
+    </div>
+    <div class="filters">
+      <select class="filter" id="subject"><option value="">All subjects</option></select>
+      <select class="filter" id="teacher"><option value="">All teachers</option></select>
+      <select class="filter" id="section"><option value="">All sections</option></select>
+      <select class="filter" id="type"><option value="">All types</option></select>
+      <select class="filter" id="access"><option value="">Any access</option><option value="free">Free lessons</option><option value="paid">Paid lessons</option><option value="denied">Policy denied</option><option value="allowed">Policy allowed</option><option value="link">Has direct link</option></select>
+      <div class="spacer"></div>
+      <button class="btn small ghost" id="reset">Reset</button>
+      <div class="view-toggle"><button id="expandAll">Expand all</button><button id="collapseAll">Collapse all</button></div>
+    </div>
+  </section>
+
+  <div class="loading" id="loading">Loading private library…</div>
+  <main class="hidden" id="resultsArea">
+    <div class="meta"><div>Showing <strong id="showing">0</strong> lesson groups</div><div id="summary"></div></div>
+    <section class="cards lesson-groups" id="results"></section>
+    <div class="empty hidden" id="empty"><strong>No matches.</strong>Try another search or reset the filters.</div>
+    <div class="load-wrap hidden" id="loadWrap"><button class="btn" id="loadMore">Load more</button></div>
+  </main>
+</div>
+
+<div class="modal" id="modal" aria-hidden="true"><section class="sheet" id="sheet"></section></div>
+<script src="/assets/app.js?v=1.2" defer></script>
+</body>
+</html>
