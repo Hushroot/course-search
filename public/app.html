@@ -4,8 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#071018">
+<meta name="referrer" content="origin" id="siteReferrerPolicy">
 <title>Course Search</title>
-<link rel="stylesheet" href="/assets/site.css?v=1.6">
+<link rel="stylesheet" href="/assets/site.css?v=1.9">
 </head>
 <body class="student-app-v2" data-grade="g10">
 <div class="student-bg" aria-hidden="true"><span></span><span></span><span></span></div>
@@ -99,7 +100,36 @@
   </main>
 </div>
 
+<div class="watch-overlay hidden" id="watchOverlay" role="dialog" aria-modal="true" aria-labelledby="watchTitle" aria-hidden="true">
+  <div class="watch-dialog">
+    <div class="watch-heading">
+      <div><span class="watch-kicker">COURSE SEARCH PLAYER</span><h2 id="watchTitle">Video player</h2><p id="watchSubtitle">Watch your course resource</p></div>
+      <button class="watch-close" id="watchClose" type="button" aria-label="Close player">×</button>
+    </div>
+    <div class="watch-stage">
+      <iframe id="watchFrame" class="hidden" title="Bunny Stream course player" loading="lazy" referrerpolicy="origin" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>
+      <video id="watchVideo" controls playsinline preload="metadata" referrerpolicy="origin"></video>
+      <div class="watch-placeholder" id="watchPlaceholder"><strong>No playable link yet</strong><span>Try refreshing this Video ID to request a new authorized link.</span></div>
+    </div>
+    <div class="watch-error hidden" id="watchError" role="status"></div>
+    <div class="watch-controls">
+      <span id="watchId">Video ID —</span>
+      <div class="watch-buttons"><button class="watch-refresh" id="watchRefresh" type="button">↻ Refresh video link</button><a id="watchOpenExternal" class="watch-external hidden" target="_blank" rel="noopener" referrerpolicy="origin">Open source ↗</a></div>
+    </div>
+    <div class="watch-help-section" id="watchHelpSection">
+      <button class="watch-help-toggle" id="watchHelpToggle" type="button" aria-controls="watchHelpPanel" aria-expanded="false"><span>📖 Playback help &amp; Colab guide</span><span class="watch-help-chevron">⌄</span></button>
+      <div class="watch-help-panel hidden" id="watchHelpPanel">
+        <div class="watch-help-heading"><div><span class="watch-kicker">STEP-BY-STEP HELP</span><h3 id="watchHelpTitle">Video playback guide</h3></div><a class="watch-help-colab" href="https://colab.research.google.com/" target="_blank" rel="noopener noreferrer">Open Google Colab ↗</a></div>
+        <p id="watchHelpIntro" class="watch-help-intro"></p>
+        <div id="watchHelpSteps" class="watch-help-steps"></div>
+        <div id="watchHelpCodeWrap" class="watch-help-code-wrap hidden"><div class="watch-help-code-header"><strong>Optional Python example</strong><button id="watchHelpCopy" type="button">Copy code</button></div><pre><code id="watchHelpCode"></code></pre></div>
+        <p class="watch-help-note">This guide is maintained by the site administrator. Download only material you have permission to access. CDN restrictions and expired tokens still apply.</p>
+      </div>
+    </div>
+    <p class="watch-footnote">The player uses your browser's real site origin as its Referer where allowed. An expired token or CDN restriction may still block playback.</p>
+  </div>
+</div>
 <div class="toast-stack" id="toastStack" aria-live="polite"></div>
-<script src="/assets/app.js?v=1.6" defer></script>
+<script src="/assets/app.js?v=1.9" defer></script>
 </body>
 </html>

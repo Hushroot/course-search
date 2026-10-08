@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Course Search — Admin</title>
-<link rel="stylesheet" href="/assets/site.css">
+<link rel="stylesheet" href="/assets/site.css?v=1.9">
 </head>
 <body>
 <section class="admin-login" id="adminLogin">
@@ -85,6 +85,40 @@
     </div>
   </section>
 
+  <section class="panel playback-panel">
+    <div class="panel-title-row"><div><h2>Video playback &amp; site domain</h2><div class="panel-sub">Set the expected public website origin when your Railway domain changes. Browser playback sends the real page origin; this setting cannot impersonate another website or override BunnyCDN token restrictions.</div></div><span class="infinity-status" id="playbackStatus">Checking…</span></div>
+    <form id="playbackSettingsForm" class="playback-settings-form">
+      <div class="field"><label for="playbackSiteOrigin">Public website origin</label><input class="input" id="playbackSiteOrigin" type="url" spellcheck="false" placeholder="https://course-search-production-2aa6.up.railway.app"><div class="infinity-help">Change this when your site moves to a new domain. Leave blank to use whichever domain visitors open.</div></div>
+      <div class="field"><label for="playbackReferrerPolicy">Browser referrer policy</label><select class="input" id="playbackReferrerPolicy"><option value="origin">Origin only (recommended)</option><option value="strict-origin-when-cross-origin">Strict origin on cross-site requests</option><option value="no-referrer">Do not send Referer</option></select><div class="infinity-help">Controls the amount of real referrer information browsers may send. It cannot set a custom or forged Referer value.</div></div>
+      <div class="playback-settings-actions"><button class="btn primary small" id="savePlaybackSettings" type="submit">Save playback settings</button><span class="label-status" id="playbackSaved"></span></div>
+      <div class="error" id="playbackError"></div>
+    </form>
+  </section>
+
+  <section class="panel playback-panel">
+    <div class="panel-title-row"><div><h2>Bunny Stream embeds</h2><div class="panel-sub">Associate an official Bunny iframe with an existing numeric course Video ID. Paste the embed URL or full iframe snippet. No CDN spoofing or video downloading required.</div></div><span class="infinity-status">Admin only</span></div>
+    <form id="bunnyEmbedForm" class="playback-settings-form">
+      <div class="field"><label for="bunnyVideoId">Course Video ID (numeric)</label><input class="input" id="bunnyVideoId" type="number" min="1" step="1" placeholder="e.g. 13112" required></div>
+      <div class="field"><label for="bunnyEmbedUrl">Bunny iframe URL or full embed HTML</label><textarea class="input bunny-embed-input" id="bunnyEmbedUrl" rows="4" placeholder="https://iframe.mediadelivery.net/embed/386/54864774-bc13-417a-862f-70e2a044d030"></textarea><div class="infinity-help">The embed belongs only to the Video ID entered above. Leaving this blank and clicking Save clears the manual embed.</div></div>
+      <div class="playback-settings-actions"><button class="btn small" id="loadBunnyEmbed" type="button">Load existing</button><button class="btn primary small" id="saveBunnyEmbed" type="submit">Save embed</button><span class="label-status" id="bunnyEmbedSaved"></span></div>
+      <div class="error" id="bunnyEmbedError"></div>
+    </form>
+  </section>
+
+  <section class="panel playback-guide-admin">
+    <div class="panel-title-row"><div><h2>Playback help &amp; Colab guide</h2><div class="panel-sub">Edit the instructions students see when they open a video and tap “Playback help”. Changes are saved to Railway persistent storage and appear without redeploying.</div></div><span class="infinity-status" id="guideStatus">Loading…</span></div>
+    <form id="playbackGuideForm" class="guide-admin-form">
+      <label class="guide-admin-toggle"><input type="checkbox" id="guideEnabled" checked><span><strong>Show guide to students</strong><small>Turn off to hide the help section without deleting your text.</small></span></label>
+      <div class="field"><label for="guideTitle">Guide title</label><input class="input" id="guideTitle" maxlength="140" required placeholder="Video not playing? Try these steps"></div>
+      <div class="field"><label for="guideIntro">Short introduction</label><textarea class="input guide-admin-textarea" id="guideIntro" maxlength="1500" rows="3" placeholder="What should students know before following the steps?"></textarea></div>
+      <div class="field"><label for="guideSteps">Instructions (one step per line)</label><textarea class="input guide-admin-textarea" id="guideSteps" maxlength="12000" rows="8" placeholder="1. Open your video…"></textarea></div>
+      <div class="field"><label for="guideCode">Optional Colab Python code (shown as text; never executed on your website)</label><textarea class="input guide-admin-textarea guide-admin-code" id="guideCode" maxlength="16000" rows="12" spellcheck="false" placeholder="import requests…"></textarea></div>
+      <div class="guide-admin-actions"><button class="btn primary" id="saveGuideBtn" type="submit">Save student guide</button><button class="btn" id="reloadGuideBtn" type="button">Discard changes</button><span id="guideSaved" class="label-status" role="status"></span></div>
+      <div id="guideError" class="error" role="alert"></div>
+      <div class="infinity-help">Students only see plain text and a copyable code example. HTML and scripts are never rendered or run inside the guide.</div>
+    </form>
+  </section>
+
   <section class="panel labels-panel">
     <div class="panel-title-row">
       <div><h2>Subject & teacher names</h2><div class="panel-sub">Readable names replace raw IDs in search, filters, and lesson groups. IDs are kept underneath so the data still matches correctly.</div></div>
@@ -112,6 +146,6 @@
     <div class="error" id="tableError"></div>
   </section>
 </main>
-<script src="/assets/admin.js" defer></script>
+<script src="/assets/admin.js?v=1.9" defer></script>
 </body>
 </html>
