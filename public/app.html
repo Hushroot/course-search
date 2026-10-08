@@ -2,55 +2,104 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#071018">
 <title>Course Search</title>
-<link rel="stylesheet" href="/assets/site.css?v=1.2">
+<link rel="stylesheet" href="/assets/site.css?v=1.6">
 </head>
-<body>
-<div class="shell" id="appRoot">
-  <header class="topbar">
-    <div class="brand">
-      <div class="logo">S</div>
-      <div class="brand-copy"><h1>Course Search</h1><p>Private search across your course dataset.</p></div>
-    </div>
-    <div class="top-actions">
-      <div class="session-pill" id="sessionLabel">Private access</div>
-      <a class="btn small ghost hidden" id="adminLink" href="/admin">Admin</a>
-      <button class="btn small ghost" id="logoutBtn">Log out</button>
+<body class="student-app-v2" data-grade="g10">
+<div class="student-bg" aria-hidden="true"><span></span><span></span><span></span></div>
+
+<div class="grade-gate" id="gradeGate" aria-hidden="true">
+  <div class="grade-gate-card">
+    <div class="grade-gate-brand"><div class="v2-logo">S</div><div><strong>Course Search</strong><span>Your private study library</span></div></div>
+    <div class="grade-gate-copy"><span class="v2-kicker">Choose your space</span><h1>What grade are you in?</h1><p>We’ll tailor subjects, teachers, lessons, and the whole interface around your grade.</p></div>
+    <div class="grade-choice-grid" id="gradeChoiceGrid"></div>
+    <button class="grade-all-link" id="browseAllBtn" type="button">Browse the full library instead</button>
+  </div>
+</div>
+
+<div class="v2-shell" id="appRoot">
+  <header class="v2-topbar">
+    <a class="v2-brand" href="/app" aria-label="Course Search home">
+      <div class="v2-logo">S</div>
+      <div class="v2-brand-copy"><strong>Course Search</strong><span id="brandGrade">Grade 10 library</span></div>
+    </a>
+
+    <nav class="grade-tabs" id="gradeTabs" aria-label="Grade switcher">
+      <button data-grade="g10" type="button">G10</button>
+      <button data-grade="g11" type="button">G11</button>
+      <button data-grade="g12" type="button">G12</button>
+    </nav>
+
+    <div class="v2-top-actions">
+      <div class="live-pill"><span></span>Auto-synced</div>
+      <a class="v2-icon-btn hidden" id="adminLink" href="/admin" title="Admin panel" aria-label="Admin panel">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.6v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3V9.6h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.08.37.3.72.6 1 .3.27.7.4 1.1.4H21v4h-.09c-.4 0-.8.13-1.1.4-.3.28-.52.63-.6 1Z"/></svg>
+      </a>
+      <button class="profile-button" id="profileBtn" type="button" aria-haspopup="true" aria-expanded="false"><span class="profile-avatar">S</span><span class="profile-copy"><strong id="sessionLabel">Private access</strong><small>Account</small></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></button>
+      <div class="profile-menu hidden" id="profileMenu">
+        <button id="changeGradeBtn" type="button">Change grade</button>
+        <button id="browseAllMenuBtn" type="button">Browse all programs</button>
+        <a class="hidden" id="adminMenuLink" href="/admin">Admin panel</a>
+        <button id="logoutBtn" type="button">Log out</button>
+      </div>
     </div>
   </header>
 
-  <section class="search-panel">
-    <div class="search-row">
-      <div class="search-box">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.4-3.4"/></svg>
-        <input id="q" autocomplete="off" placeholder="Search lessons, videos, topics, lesson ID, teacher ID…">
-        <button id="clear" title="Clear">×</button>
+  <main>
+    <section class="grade-hero" id="gradeHero">
+      <div class="grade-orb grade-orb-a"></div><div class="grade-orb grade-orb-b"></div>
+      <div class="hero-copy">
+        <div class="hero-eyebrow"><span id="heroGradeBadge">G10</span><span id="heroKicker">Foundation year</span></div>
+        <h1 id="heroTitle">Build the base. Find anything fast.</h1>
+        <p id="heroText">Your Grade 10 subjects, teachers, lessons, videos, PDFs, and practice resources in one place.</p>
       </div>
-      <div class="count-box"><strong id="matchCount">0</strong><span>matching lessons</span></div>
-    </div>
-    <div class="filters">
-      <select class="filter" id="subject"><option value="">All subjects</option></select>
-      <select class="filter" id="teacher"><option value="">All teachers</option></select>
-      <select class="filter" id="section"><option value="">All sections</option></select>
-      <select class="filter" id="type"><option value="">All types</option></select>
-      <select class="filter" id="access"><option value="">Any access</option><option value="free">Free lessons</option><option value="paid">Paid lessons</option><option value="denied">Policy denied</option><option value="allowed">Policy allowed</option><option value="link">Has direct link</option></select>
-      <div class="spacer"></div>
-      <button class="btn small ghost" id="reset">Reset</button>
-      <div class="view-toggle"><button id="expandAll">Expand all</button><button id="collapseAll">Collapse all</button></div>
-    </div>
-  </section>
+      <div class="hero-stats" id="heroStats">
+        <div><strong id="statLessons">0</strong><span>Lessons</span></div>
+        <div><strong id="statResources">0</strong><span>Resources</span></div>
+        <div><strong id="statSubjects">0</strong><span>Subjects</span></div>
+        <div><strong id="statTeachers">0</strong><span>Teachers</span></div>
+      </div>
+    </section>
 
-  <div class="loading" id="loading">Loading private library…</div>
-  <main class="hidden" id="resultsArea">
-    <div class="meta"><div>Showing <strong id="showing">0</strong> lesson groups</div><div id="summary"></div></div>
-    <section class="cards lesson-groups" id="results"></section>
-    <div class="empty hidden" id="empty"><strong>No matches.</strong>Try another search or reset the filters.</div>
-    <div class="load-wrap hidden" id="loadWrap"><button class="btn" id="loadMore">Load more</button></div>
+    <section class="v2-search-card" id="searchCard">
+      <div class="v2-search-main">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.4-3.4"/></svg>
+        <input id="q" autocomplete="off" placeholder="Search lessons, videos, topics, teachers, IDs…" aria-label="Search course library">
+        <kbd>Ctrl K</kbd>
+        <button class="search-clear hidden" id="clear" type="button" aria-label="Clear search">×</button>
+      </div>
+      <button class="filter-trigger" id="filterTrigger" type="button" aria-expanded="true"><svg viewBox="0 0 24 24"><path d="M4 7h16M7 12h10M10 17h4"/></svg><span>Filters</span><b id="activeFilterCount" class="hidden">0</b></button>
+
+      <div class="v2-filter-panel" id="filterPanel">
+        <div class="quick-subjects" id="quickSubjects"></div>
+        <div class="filter-controls">
+          <label><span>Subject</span><select id="subject"><option value="">All subjects</option></select></label>
+          <label><span>Teacher</span><select id="teacher"><option value="">All teachers</option></select></label>
+          <label><span>Resource</span><select id="type"><option value="">All resource types</option></select></label>
+          <label><span>Access</span><select id="access"><option value="">Any access</option><option value="link">Has direct link</option><option value="free">Free lesson</option><option value="paid">Paid lesson</option></select></label>
+          <label><span>Sort</span><select id="sort"><option value="newest">Newest lesson ID</option><option value="relevance">Best match</option><option value="resources">Most resources</option><option value="az">Lesson A–Z</option><option value="oldest">Oldest lesson ID</option></select></label>
+        </div>
+        <div class="filter-footer"><button id="favoritesOnly" class="soft-toggle" type="button"><svg viewBox="0 0 24 24"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9L12 3Z"/></svg>Favorites only</button><button class="text-button" id="reset" type="button">Reset everything</button></div>
+      </div>
+    </section>
+
+    <section class="library-toolbar">
+      <div><span class="result-kicker" id="resultKicker">Grade 10 library</span><h2><span id="matchCount">0</span> lesson groups</h2><p id="summary">Loading your library…</p></div>
+      <div class="toolbar-actions"><button class="toolbar-btn" id="collapseAll" type="button">Collapse all</button><button class="toolbar-btn" id="expandAll" type="button">Expand visible</button></div>
+    </section>
+
+    <section class="v2-loading" id="loading"><div class="skeleton-stack"><i></i><i></i><i></i></div><span>Loading your private library…</span></section>
+    <section class="v2-results hidden" id="resultsArea">
+      <div class="lesson-feed" id="results"></div>
+      <div class="v2-empty hidden" id="empty"><div class="empty-icon"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.4-3.4"/></svg></div><strong>No lessons found</strong><span>Try another search, remove a filter, or switch grades.</span><button id="emptyReset" type="button">Reset filters</button></div>
+      <div class="load-wrap hidden" id="loadWrap"><button class="load-more-v2" id="loadMore" type="button">Load more lessons</button></div>
+    </section>
   </main>
 </div>
 
-<div class="modal" id="modal" aria-hidden="true"><section class="sheet" id="sheet"></section></div>
-<script src="/assets/app.js?v=1.2" defer></script>
+<div class="toast-stack" id="toastStack" aria-live="polite"></div>
+<script src="/assets/app.js?v=1.6" defer></script>
 </body>
 </html>

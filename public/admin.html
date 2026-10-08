@@ -48,6 +48,43 @@
     <div class="stat"><span>Expired / off</span><strong id="statOff">0</strong></div>
   </section>
 
+  <section class="panel infinity-panel">
+    <div class="panel-title-row">
+      <div><h2>Fetch videos from Infinity</h2><div class="panel-sub">Paste your Infinity cookie once, then add or refresh any course item by Video ID. The server fetches the lesson/topic metadata and saves it to persistent storage automatically.</div></div>
+      <span class="infinity-status" id="infinityStatus">Checking…</span>
+    </div>
+    <div class="infinity-grid">
+      <form id="cookieForm" class="infinity-box">
+        <div class="field"><label for="infinityCookie">Infinity Cookie header</label><input class="input" id="infinityCookie" type="password" autocomplete="off" spellcheck="false" placeholder="cf_clearance=...; XSRF-TOKEN=...; jessor_session=..."></div>
+        <div class="infinity-help">Stored only in the server's persistent volume. The current cookie is never shown back in the browser.</div>
+        <button class="btn small" id="saveCookieBtn" type="submit">Save / replace cookie</button>
+        <div class="error" id="cookieError"></div><div class="label-status" id="cookieSaved"></div>
+      </form>
+      <form id="videoFetchForm" class="infinity-box">
+        <div class="field"><label for="videoId">Video ID</label><input class="input" id="videoId" type="number" min="1" step="1" inputmode="numeric" placeholder="Example: 13112"></div>
+        <div class="infinity-help">If this ID already exists, its metadata is refreshed instead of creating a duplicate.</div>
+        <button class="btn primary small" id="fetchVideoBtn" type="submit">Fetch & save video</button>
+        <div class="error" id="videoFetchError"></div><div class="fetch-result" id="videoFetchResult"></div>
+      </form>
+
+      <div class="infinity-box auto-scan-box">
+        <div class="scan-head">
+          <div><strong>Automatic daily scan</strong><div class="infinity-help">Starts at the highest stored Video ID + 1. Any hit resets the miss streak. It stops only after 1,000 consecutive empty IDs, then the searchable database is already updated.</div></div>
+          <span class="infinity-status" id="scanStatusBadge">Checking…</span>
+        </div>
+        <div class="scan-stats">
+          <div><span>Highest stored</span><strong id="scanHighest">—</strong></div>
+          <div><span>Last checked</span><strong id="scanCheckedId">—</strong></div>
+          <div><span>Hits this run</span><strong id="scanHits">0</strong></div>
+          <div><span>Miss streak</span><strong id="scanMisses">0 / 1000</strong></div>
+        </div>
+        <div class="scan-meta" id="scanMeta">Loading scan state…</div>
+        <div class="scan-actions"><button class="btn primary small" id="runScanBtn" type="button">Run scan now</button><button class="btn small danger ghost" id="stopScanBtn" type="button" disabled>Stop scan</button></div>
+        <div class="error" id="scanError"></div>
+      </div>
+    </div>
+  </section>
+
   <section class="panel labels-panel">
     <div class="panel-title-row">
       <div><h2>Subject & teacher names</h2><div class="panel-sub">Readable names replace raw IDs in search, filters, and lesson groups. IDs are kept underneath so the data still matches correctly.</div></div>
