@@ -12,8 +12,10 @@ A private web app for searching the uploaded course CSV. The course dataset is s
 - Revoke/re-enable, reset usage, or delete codes
 - Login rate limiting
 - Course JSON blocked for unauthenticated visitors
-- 3,956 meaningful course/video rows indexed from the supplied CSV
+- 3,956 bundled course/video rows plus admin-side live Video ID fetching
 - Search, filters, grid/list layouts, and course details
+- Fetch/add or refresh an Infinity course item directly from the admin panel by Video ID
+- Persistent course updates on the Railway volume
 - Zero npm dependencies; Node.js 20+ only
 
 ## Run locally
@@ -40,12 +42,14 @@ If you prefer to configure it manually, copy `.env.example` to `.env` and set:
 - `ADMIN_PASSWORD` — unique admin-panel password; at least 12 characters
 - `SESSION_SECRET` — random secret; at least 32 characters
 - `COOKIE_SECURE` — set `true` behind HTTPS. Secure cookies are also enabled automatically when `NODE_ENV=production`.
+- `STATE_DIR` — persistent state directory in production; use `/data` on Railway.
+- `INFINITY_COOKIE` — optional Infinity School Cookie header. If omitted, an admin can save/replace it from `/admin`; the value is never returned to the browser.
 
 ## Deployment
 
 This is intentionally **not** a GitHub Pages/static-only project. Static hosting cannot keep the course data or access-code logic private.
 
-Deploy it to a Node.js host with a **persistent filesystem/volume**. `data/access-codes.json` changes whenever a code is created, used, revoked, or deleted, so it must survive application restarts/redeploys.
+Deploy it to a Node.js host with a **persistent filesystem/volume**. Access codes, labels, the live course database, and the optional saved Infinity cookie all live under `STATE_DIR`, so that directory must survive application restarts/redeploys.
 
 Recommended deployment shape:
 
@@ -74,7 +78,7 @@ Keep the CSV outside `public/`, then run:
 python3 scripts/import_csv.py /path/to/videos_course_info.csv
 ```
 
-That rebuilds `data/courses.json`. Restart the server afterward.
+That rebuilds the bundled `data/courses.json`. On production, admin-fetched items are kept in the persistent `STATE_DIR/courses.json`.
 
 ## Lesson grouping (v1.2)
 
@@ -102,3 +106,54 @@ SESSION_SECRET=<random value, 32+ characters>
 ```
 
 Use `npm start` as the start command and `/health` as the healthcheck path.
+
+## Direct Infinity Video ID fetch (v1.4)
+
+The admin panel can fetch a course item directly from Infinity School using its numeric Video ID. The server calls the same `get-file/<video_id>` and `get-video/<video_id>` endpoints used by the original scanner, parses lesson/topic/course metadata, and upserts the result into the persistent course database. Existing IDs are refreshed instead of duplicated.
+
+The Infinity cookie can be configured in either of two ways:
+
+1. Set `INFINITY_COOKIE` as a private Railway variable, or
+2. Leave that variable unset and paste a fresh Cookie header into the admin panel. The saved value is written only to the private persistent volume with restrictive file permissions and is never exposed by an API response.
+
+If Infinity expires or rejects the cookie, replace it in the admin panel and retry the Video ID.
+
+
+## v1.5 — automatic daily Video-ID scan
+
+When `AUTO_SCAN_ENABLED=true` (the default), the server checks whether a scan is due. A scan:
+
+1. Finds the highest Video ID already stored in the persistent course database.
+2. Starts at `highest_id + 1`.
+3. Fetches IDs in ordered batches using the same Infinity `get-file/{id}` and `get-video/{id}` endpoints as the manual fetch tool.
+4. Saves every hit into the persistent `/data/courses.json` database. Any hit resets the consecutive-miss counter to zero.
+5. Stops after `AUTO_SCAN_MAX_MISSES` consecutive real empty IDs (default: `1000`).
+6. Stores progress/status in `/data/scan-state.json` and runs again after `AUTO_SCAN_INTERVAL_HOURS` (default: `24`). If Railway restarts and a run is overdue, the server catches up after boot.
+
+Authentication redirects, an expired cookie, rate limits, or temporary server/network errors stop the scan as an error instead of being counted toward the 1000 empty-ID limit. The admin panel shows live scan progress and includes **Run scan now** and **Stop scan** controls.
+
+Optional environment variables:
+
+```text
+AUTO_SCAN_ENABLED=true
+AUTO_SCAN_INTERVAL_HOURS=24
+AUTO_SCAN_MAX_MISSES=1000
+AUTO_SCAN_BATCH_SIZE=25
+AUTO_SCAN_WORKERS=5
+```
+
+Keep `STATE_DIR=/data` on Railway and keep the `/data` volume attached so fetched videos, scan progress, labels, codes, and the saved Infinity cookie survive redeploys.
+
+Open search pages check a lightweight course-data version once per minute. After a completed scan (or a manual Video-ID fetch), an already-open search page reloads itself once so the new library appears without a redeploy.
+
+## v1.6 student experience
+
+The student library is grade-aware and defaults to a first-visit grade picker. The current dataset maps the main class sections as:
+
+- Grade 10: `class_section_id = 6`
+- Grade 11: `class_section_id = 7`
+- Grade 12: `class_section_id = 8` (plus the legacy/alternate Grade 12 section `9`)
+- Special/other program sections remain available through **Browse all programs**.
+
+Each grade has a distinct theme, dynamically scoped subjects/teachers, grade-specific stats, quick subject chips, favorites stored in the browser, sorting, responsive filters, and grouped lesson resources. The grade choice is stored in localStorage and can be changed from the header account menu at any time.
+

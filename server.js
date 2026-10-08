@@ -8,7 +8,7 @@ const crypto = require('crypto');
 const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, 'public');
 const DATA_DIR = path.join(ROOT, 'data');
-const COURSES_FILE = path.join(DATA_DIR, 'courses.json');
+const BUNDLED_COURSES_FILE = path.join(DATA_DIR, 'courses.json');
 const BUNDLED_LABELS_FILE = path.join(DATA_DIR, 'labels.json');
 
 function loadEnvFile() {
@@ -33,6 +33,9 @@ loadEnvFile();
 const STATE_DIR = process.env.STATE_DIR ? path.resolve(process.env.STATE_DIR) : DATA_DIR;
 const CODES_FILE = path.join(STATE_DIR, 'access-codes.json');
 const LABELS_FILE = path.join(STATE_DIR, 'labels.json');
+const COURSES_FILE = path.join(STATE_DIR, 'courses.json');
+const INFINITY_AUTH_FILE = path.join(STATE_DIR, 'infinity-auth.json');
+const SCAN_STATE_FILE = path.join(STATE_DIR, 'scan-state.json');
 
 fs.mkdirSync(STATE_DIR, { recursive: true });
 if (!fs.existsSync(CODES_FILE)) fs.writeFileSync(CODES_FILE, '[]\n');
@@ -41,10 +44,46 @@ if (!fs.existsSync(LABELS_FILE)) {
   else fs.writeFileSync(LABELS_FILE, '{\n  \"subjects\": {},\n  \"teachers\": {}\n}\n');
 }
 
+function readJsonFile(filePath, fallback) {
+  try { return JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch { return fallback; }
+}
+function atomicWriteJson(filePath, value, mode) {
+  const tmp = `${filePath}.tmp`;
+  fs.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, mode ? { mode } : undefined);
+  fs.renameSync(tmp, filePath);
+  if (mode) { try { fs.chmodSync(filePath, mode); } catch {} }
+}
+function mergeBundledCoursesIntoState() {
+  const bundled = readJsonFile(BUNDLED_COURSES_FILE, []);
+  if (!Array.isArray(bundled)) return;
+  if (!fs.existsSync(COURSES_FILE)) {
+    atomicWriteJson(COURSES_FILE, bundled);
+    return;
+  }
+  const state = readJsonFile(COURSES_FILE, []);
+  if (!Array.isArray(state)) {
+    atomicWriteJson(COURSES_FILE, bundled);
+    return;
+  }
+  const stateIds = new Set(state.map(x => String(x && x.id)).filter(Boolean));
+  const missing = bundled.filter(x => x && x.id !== null && x.id !== undefined && !stateIds.has(String(x.id)));
+  if (missing.length) atomicWriteJson(COURSES_FILE, [...state, ...missing]);
+}
+mergeBundledCoursesIntoState();
+
 const PORT = Number(process.env.PORT || 3000);
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const SESSION_SECRET = process.env.SESSION_SECRET || '';
 const COOKIE_SECURE = String(process.env.COOKIE_SECURE || '').toLowerCase() === 'true' || process.env.NODE_ENV === 'production';
+
+const AUTO_SCAN_ENABLED = String(process.env.AUTO_SCAN_ENABLED ?? 'true').toLowerCase() !== 'false';
+const AUTO_SCAN_INTERVAL_HOURS = Math.min(168, Math.max(1, Number(process.env.AUTO_SCAN_INTERVAL_HOURS || 24) || 24));
+const AUTO_SCAN_INTERVAL_MS = AUTO_SCAN_INTERVAL_HOURS * 60 * 60 * 1000;
+const AUTO_SCAN_MAX_MISSES = Math.min(10000, Math.max(1, Math.floor(Number(process.env.AUTO_SCAN_MAX_MISSES || 1000) || 1000)));
+const AUTO_SCAN_BATCH_SIZE = Math.min(100, Math.max(1, Math.floor(Number(process.env.AUTO_SCAN_BATCH_SIZE || 25) || 25)));
+// Each video worker fires get-file + get-video together. Five workers ~= ten concurrent HTTP requests.
+const AUTO_SCAN_WORKERS = Math.min(10, Math.max(1, Math.floor(Number(process.env.AUTO_SCAN_WORKERS || 5) || 5)));
+const AUTO_SCAN_ERROR_RETRY_MS = 60 * 60 * 1000;
 
 if (ADMIN_PASSWORD.length < 12 || ADMIN_PASSWORD.startsWith('replace-with-')) {
   console.error('ADMIN_PASSWORD must be set to a unique password with at least 12 characters.');
@@ -300,6 +339,478 @@ function validExpiry(value) {
   return d.toISOString();
 }
 
+const INFINITY_BASE = 'https://infinityschool.net';
+const INFINITY_TIMEOUT_MS = 20 * 1000;
+const DENIAL_MARKERS = [
+  'غير مصرح',
+  'المتصفح غير مصرح',
+  'يرجى استخدام المتصفح المسموح',
+  'not authorized',
+  'browser is not authorized',
+  'unauthorized browser',
+  'use the allowed browser',
+];
+
+function readInfinityAuth() {
+  const saved = readJsonFile(INFINITY_AUTH_FILE, {});
+  return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+}
+function infinityCookie() {
+  return String(process.env.INFINITY_COOKIE || readInfinityAuth().cookie || '').trim();
+}
+function infinityAuthStatus() {
+  const saved = readInfinityAuth();
+  const fromEnv = Boolean(String(process.env.INFINITY_COOKIE || '').trim());
+  return {
+    configured: Boolean(infinityCookie()),
+    source: fromEnv ? 'environment' : (saved.cookie ? 'admin' : null),
+    updatedAt: fromEnv ? null : (saved.updatedAt || null),
+  };
+}
+function saveInfinityCookie(value) {
+  const cookieValue = String(value || '').trim();
+  if (!cookieValue) throw Object.assign(new Error('Paste the full Infinity School Cookie header.'), { status: 400 });
+  if (cookieValue.length > 16 * 1024) throw Object.assign(new Error('Cookie header is too large.'), { status: 400 });
+  atomicWriteJson(INFINITY_AUTH_FILE, { cookie: cookieValue, updatedAt: nowIso() }, 0o600);
+}
+function safeDict(obj, key) {
+  const value = obj && typeof obj === 'object' && !Array.isArray(obj) ? obj[key] : null;
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+function cleanText(value, max = 800) {
+  if (value === null || value === undefined) return null;
+  const text = String(value).replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim();
+  return text ? text.slice(0, max) : null;
+}
+function validHttpUrl(value) {
+  return typeof value === 'string' && /^https?:\/\//i.test(value.trim());
+}
+function absoluteInfinityUrl(value) {
+  if (!value || typeof value !== 'string') return null;
+  try { return new URL(value, INFINITY_BASE).toString(); } catch { return null; }
+}
+function isDeniedPayload(payload, text = '') {
+  const body = payload && typeof payload === 'object' ? String(payload.view || payload.message || '') : String(text || '');
+  const lower = body.toLowerCase();
+  return DENIAL_MARKERS.some(marker => lower.includes(marker.toLowerCase()));
+}
+function explicitDownloadLink(videoJson, fileJson) {
+  const video = safeDict(videoJson, 'video');
+  const file = safeDict(fileJson, 'file');
+  const candidates = [
+    video.download_link, video.download_url, video.url, video.source,
+    videoJson && videoJson.download_link, videoJson && videoJson.download_url,
+    file.download_link, file.download_url,
+  ];
+  for (const candidate of candidates) if (validHttpUrl(candidate)) return absoluteInfinityUrl(candidate);
+  return null;
+}
+async function infinityRequest(url) {
+  const cookieValue = infinityCookie();
+  if (!cookieValue) throw Object.assign(new Error('Infinity cookie is not configured. Add it in the admin panel first.'), { status: 400 });
+  let lastError = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        redirect: 'manual',
+        signal: AbortSignal.timeout(INFINITY_TIMEOUT_MS),
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36',
+          'Accept': 'application/json,text/html,*/*',
+          'Accept-Language': 'en-US,en;q=0.9,ar;q=0.8',
+          'X-Requested-With': 'XMLHttpRequest',
+          'Referer': `${INFINITY_BASE}/student_dashboard/home`,
+          'Cookie': cookieValue,
+        },
+      });
+      const contentType = response.headers.get('content-type') || '';
+      const text = await response.text();
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch {}
+      if ([429, 500, 502, 503, 504].includes(response.status) && attempt < 2) {
+        await new Promise(resolve => setTimeout(resolve, 400 * (2 ** attempt)));
+        continue;
+      }
+      return { status: response.status, url: response.url, json: data, text: data ? null : text, contentType };
+    } catch (err) {
+      lastError = err;
+      if (attempt < 2) {
+        await new Promise(resolve => setTimeout(resolve, 400 * (2 ** attempt)));
+        continue;
+      }
+    }
+  }
+  throw Object.assign(new Error(`Infinity request failed: ${lastError ? lastError.message : 'unknown error'}`), { status: 502 });
+}
+function parseInfinityRecord(videoId, fileResponse, videoResponse) {
+  const fileJson = fileResponse.json;
+  const videoJson = videoResponse.json;
+  const file = safeDict(fileJson, 'file');
+  const lesson = safeDict(file, 'lesson');
+  const topic = safeDict(file, 'lesson_topic');
+  const video = safeDict(videoJson, 'video');
+  const denied = isDeniedPayload(videoJson, videoResponse.text);
+  const download = denied ? null : explicitDownloadLink(videoJson, fileJson);
+  const lessonId = lesson.id ?? file.lesson_id ?? null;
+  const topicId = topic.id ?? file.lesson_topic_id ?? file.topic_id ?? null;
+  return {
+    id: Number(videoId),
+    video: cleanText(video.file_name || video.name || file.file_name || file.name, 300),
+    topicId,
+    topic: cleanText(topic.name || topic.title, 300),
+    lessonId,
+    lesson: cleanText(lesson.name || lesson.title, 300),
+    teacher: lesson.teacher_id ?? null,
+    subject: lesson.subject_id ?? null,
+    section: lesson.class_section_id ?? null,
+    free: lesson.is_lesson_free ?? null,
+    denied,
+    type: cleanText(file.type_detail || file.type || video.type_detail || video.type, 120),
+    download,
+    path: cleanText(file.video_path || video.video_path || video.path, 1000),
+    thumb: absoluteInfinityUrl(topic.thumbnail || file.thumbnail || lesson.thumbnail),
+    lessonThumb: absoluteInfinityUrl(lesson.thumbnail),
+    description: cleanText(lesson.description, 800),
+    topicDescription: cleanText(topic.description, 800),
+    duration: file.duration ?? video.duration ?? null,
+    price: file.file_price ?? file.price ?? null,
+    fetchedAt: nowIso(),
+  };
+}
+function usefulCourseRecord(row) {
+  return Boolean(row && (row.video || row.lessonId !== null && row.lessonId !== undefined || row.topicId !== null && row.topicId !== undefined || row.download));
+}
+function mergeNonEmpty(oldRow, newRow) {
+  const merged = { ...(oldRow || {}) };
+  for (const [key, value] of Object.entries(newRow || {})) {
+    if (value !== null && value !== undefined && value !== '') merged[key] = value;
+    else if (!(key in merged)) merged[key] = value;
+  }
+  return merged;
+}
+function upsertCourseRecord(record) {
+  const courses = readJsonFile(COURSES_FILE, []);
+  if (!Array.isArray(courses)) throw Object.assign(new Error('Course database is invalid.'), { status: 500 });
+  const idx = courses.findIndex(x => x && String(x.id) === String(record.id));
+  const action = idx >= 0 ? 'updated' : 'added';
+  if (idx >= 0) courses[idx] = mergeNonEmpty(courses[idx], record);
+  else courses.push(record);
+  courses.sort((a, b) => Number(a.id || 0) - Number(b.id || 0));
+  atomicWriteJson(COURSES_FILE, courses);
+  return { action, record: idx >= 0 ? courses.find(x => String(x.id) === String(record.id)) : record, total: courses.length };
+}
+async function fetchAndStoreVideo(videoId) {
+  const id = Number(videoId);
+  if (!Number.isInteger(id) || id < 1 || id > 999999999) throw Object.assign(new Error('Video ID must be a positive whole number.'), { status: 400 });
+  const [fileResponse, videoResponse] = await Promise.all([
+    infinityRequest(`${INFINITY_BASE}/student_dashboard/topics/get-file/${id}`),
+    infinityRequest(`${INFINITY_BASE}/student_dashboard/topics/get-video/${id}?order=1&order_topic=1&count_completed_files=0&count_files=1`),
+  ]);
+  if ([401, 403].includes(fileResponse.status) || [401, 403].includes(videoResponse.status)) {
+    throw Object.assign(new Error('Infinity rejected the saved cookie. Update it in the admin panel and try again.'), { status: 502 });
+  }
+  const record = parseInfinityRecord(id, fileResponse, videoResponse);
+  if (!usefulCourseRecord(record)) {
+    throw Object.assign(new Error(`Video ID ${id} returned no usable course data.`), { status: 404 });
+  }
+  const stored = upsertCourseRecord(record);
+  return { ...stored, http: { file: fileResponse.status, video: videoResponse.status } };
+}
+
+
+function defaultScanState() {
+  return {
+    running: false,
+    trigger: null,
+    lastStatus: 'never',
+    lastError: null,
+    lastStartedAt: null,
+    lastCompletedAt: null,
+    lastStartId: null,
+    lastCheckedId: null,
+    lastHitId: null,
+    lastHitsFound: 0,
+    lastCheckedCount: 0,
+    lastMissStreak: 0,
+    nextDueAt: null,
+  };
+}
+function readScanState() {
+  const saved = readJsonFile(SCAN_STATE_FILE, {});
+  return { ...defaultScanState(), ...(saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {}) };
+}
+function writeScanState(patch) {
+  const state = { ...readScanState(), ...patch };
+  atomicWriteJson(SCAN_STATE_FILE, state);
+  return state;
+}
+function highestStoredVideoId() {
+  const courses = readJsonFile(COURSES_FILE, []);
+  if (!Array.isArray(courses) || !courses.length) return 0;
+  let max = 0;
+  for (const row of courses) {
+    const id = Number(row && row.id);
+    if (Number.isInteger(id) && id > max) max = id;
+  }
+  return max;
+}
+function upsertCourseRecords(records) {
+  if (!Array.isArray(records) || !records.length) return { added: 0, updated: 0, total: readJsonFile(COURSES_FILE, []).length || 0 };
+  const courses = readJsonFile(COURSES_FILE, []);
+  if (!Array.isArray(courses)) throw Object.assign(new Error('Course database is invalid.'), { status: 500 });
+  const index = new Map(courses.map((row, i) => [String(row && row.id), i]));
+  let added = 0;
+  let updated = 0;
+  for (const record of records) {
+    const key = String(record.id);
+    if (index.has(key)) {
+      const i = index.get(key);
+      courses[i] = mergeNonEmpty(courses[i], record);
+      updated += 1;
+    } else {
+      index.set(key, courses.length);
+      courses.push(record);
+      added += 1;
+    }
+  }
+  courses.sort((a, b) => Number(a.id || 0) - Number(b.id || 0));
+  atomicWriteJson(COURSES_FILE, courses);
+  return { added, updated, total: courses.length };
+}
+function isRedirectStatus(status) {
+  return Number(status) >= 300 && Number(status) < 400;
+}
+function isTransientInfinityStatus(status) {
+  return [408, 425, 429, 500, 502, 503, 504].includes(Number(status));
+}
+function isAuthFailureResponse(response) {
+  if (!response) return false;
+  if ([401, 403].includes(Number(response.status)) || isRedirectStatus(response.status)) return true;
+  const contentType = String(response.contentType || '').toLowerCase();
+  const text = String(response.text || '').toLowerCase();
+  if (contentType.includes('text/html') && /login|sign[ -]?in|تسجيل الدخول|تسجيل دخول/.test(text)) return true;
+  return false;
+}
+async function fetchVideoForScan(videoId) {
+  const id = Number(videoId);
+  const [fileResponse, videoResponse] = await Promise.all([
+    infinityRequest(`${INFINITY_BASE}/student_dashboard/topics/get-file/${id}`),
+    infinityRequest(`${INFINITY_BASE}/student_dashboard/topics/get-video/${id}?order=1&order_topic=1&count_completed_files=0&count_files=1`),
+  ]);
+
+  if (isAuthFailureResponse(fileResponse) || isAuthFailureResponse(videoResponse)) {
+    throw Object.assign(new Error('Infinity rejected or redirected the saved cookie. Update the cookie in the admin panel.'), { status: 502, scanFatal: true });
+  }
+  if (isTransientInfinityStatus(fileResponse.status) || isTransientInfinityStatus(videoResponse.status)) {
+    throw Object.assign(new Error(`Infinity returned a temporary error (${fileResponse.status}/${videoResponse.status}). The scan stopped without counting it as a miss.`), { status: 502, scanFatal: true });
+  }
+
+  const record = parseInfinityRecord(id, fileResponse, videoResponse);
+  if (usefulCourseRecord(record)) {
+    return { kind: 'hit', id, record, http: { file: fileResponse.status, video: videoResponse.status } };
+  }
+
+  // If the response is explicit denial markup and contains no useful metadata, treat it as auth/browser failure,
+  // not as one of the 1000 real empty IDs.
+  if (isDeniedPayload(fileResponse.json, fileResponse.text) || isDeniedPayload(videoResponse.json, videoResponse.text)) {
+    throw Object.assign(new Error('Infinity denied the scanner request. Refresh the saved cookie/browser session.'), { status: 502, scanFatal: true });
+  }
+
+  return { kind: 'miss', id, http: { file: fileResponse.status, video: videoResponse.status } };
+}
+async function mapWithConcurrency(values, limit, fn) {
+  const results = new Array(values.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, values.length) }, async () => {
+    while (true) {
+      const i = cursor++;
+      if (i >= values.length) return;
+      try {
+        results[i] = { ok: true, value: await fn(values[i]) };
+      } catch (error) {
+        results[i] = { ok: false, error };
+      }
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+const scanRuntime = {
+  running: false,
+  stopRequested: false,
+  promise: null,
+};
+
+function scanStatus() {
+  const state = readScanState();
+  const highestId = highestStoredVideoId();
+  const refTime = state.lastStatus === 'error' ? state.lastStartedAt : (state.lastCompletedAt || state.lastStartedAt);
+  const dueMs = state.lastStatus === 'error' ? AUTO_SCAN_ERROR_RETRY_MS : AUTO_SCAN_INTERVAL_MS;
+  const nextDueAt = refTime ? new Date(new Date(refTime).getTime() + dueMs).toISOString() : null;
+  return {
+    ...state,
+    running: scanRuntime.running,
+    stopRequested: scanRuntime.stopRequested,
+    highestStoredId: highestId,
+    nextStartId: highestId + 1,
+    nextDueAt,
+    config: {
+      enabled: AUTO_SCAN_ENABLED,
+      intervalHours: AUTO_SCAN_INTERVAL_HOURS,
+      maxConsecutiveMisses: AUTO_SCAN_MAX_MISSES,
+      batchSize: AUTO_SCAN_BATCH_SIZE,
+      workers: AUTO_SCAN_WORKERS,
+    },
+  };
+}
+function scanIsDue() {
+  if (!AUTO_SCAN_ENABLED || scanRuntime.running) return false;
+  const state = readScanState();
+  const ref = state.lastStatus === 'error' ? state.lastStartedAt : (state.lastCompletedAt || state.lastStartedAt);
+  if (!ref) return true;
+  const refMs = new Date(ref).getTime();
+  if (!Number.isFinite(refMs)) return true;
+  const waitMs = state.lastStatus === 'error' ? AUTO_SCAN_ERROR_RETRY_MS : AUTO_SCAN_INTERVAL_MS;
+  return Date.now() - refMs >= waitMs;
+}
+async function runVideoScan(trigger = 'scheduled') {
+  if (scanRuntime.running) return scanStatus();
+  if (!infinityCookie()) {
+    const now = nowIso();
+    return writeScanState({
+      running: false,
+      trigger,
+      lastStatus: 'error',
+      lastError: 'Infinity cookie is not configured. Save it in the admin panel.',
+      lastStartedAt: now,
+      lastCompletedAt: null,
+    });
+  }
+
+  scanRuntime.running = true;
+  scanRuntime.stopRequested = false;
+  const startId = highestStoredVideoId() + 1;
+  let nextId = startId;
+  let checked = 0;
+  let hits = 0;
+  let missStreak = 0;
+  let lastCheckedId = startId - 1;
+  let lastHitId = null;
+  const startedAt = nowIso();
+
+  writeScanState({
+    running: true,
+    trigger,
+    lastStatus: 'running',
+    lastError: null,
+    lastStartedAt: startedAt,
+    lastCompletedAt: null,
+    lastStartId: startId,
+    lastCheckedId,
+    lastHitId: null,
+    lastHitsFound: 0,
+    lastCheckedCount: 0,
+    lastMissStreak: 0,
+  });
+  console.log(`[auto-scan] ${trigger} scan starting at Video ID ${startId}`);
+
+  try {
+    while (missStreak < AUTO_SCAN_MAX_MISSES && !scanRuntime.stopRequested) {
+      const batchIds = Array.from({ length: AUTO_SCAN_BATCH_SIZE }, (_, i) => nextId + i);
+      const results = await mapWithConcurrency(batchIds, AUTO_SCAN_WORKERS, fetchVideoForScan);
+      const hitsToSave = [];
+      let fatalError = null;
+
+      for (let i = 0; i < batchIds.length; i += 1) {
+        if (scanRuntime.stopRequested || missStreak >= AUTO_SCAN_MAX_MISSES) break;
+        const videoId = batchIds[i];
+        const result = results[i];
+        lastCheckedId = videoId;
+
+        if (!result || !result.ok) {
+          fatalError = result && result.error ? result.error : new Error(`Video ID ${videoId} failed.`);
+          break;
+        }
+
+        checked += 1;
+        if (result.value.kind === 'hit') {
+          missStreak = 0;
+          hits += 1;
+          lastHitId = videoId;
+          hitsToSave.push(result.value.record);
+          console.log(`[auto-scan] hit ${videoId} | ${result.value.record.video || 'resource found'}`);
+        } else {
+          missStreak += 1;
+          if (missStreak === 1 || missStreak % 100 === 0 || missStreak === AUTO_SCAN_MAX_MISSES) {
+            console.log(`[auto-scan] miss ${videoId} | streak ${missStreak}/${AUTO_SCAN_MAX_MISSES}`);
+          }
+        }
+      }
+
+      if (hitsToSave.length) upsertCourseRecords(hitsToSave);
+      writeScanState({
+        running: true,
+        trigger,
+        lastStatus: 'running',
+        lastCheckedId,
+        lastHitId,
+        lastHitsFound: hits,
+        lastCheckedCount: checked,
+        lastMissStreak: missStreak,
+      });
+
+      if (fatalError) throw fatalError;
+      nextId = batchIds[batchIds.length - 1] + 1;
+    }
+
+    const stopped = scanRuntime.stopRequested;
+    const completedAt = nowIso();
+    const finalState = writeScanState({
+      running: false,
+      trigger,
+      lastStatus: stopped ? 'stopped' : 'completed',
+      lastError: null,
+      lastCompletedAt: completedAt,
+      lastCheckedId,
+      lastHitId,
+      lastHitsFound: hits,
+      lastCheckedCount: checked,
+      lastMissStreak: missStreak,
+    });
+    console.log(`[auto-scan] ${stopped ? 'stopped' : 'completed'} | checked ${checked} | hits ${hits} | final miss streak ${missStreak}`);
+    return finalState;
+  } catch (error) {
+    const failedAt = nowIso();
+    console.error('[auto-scan] failed:', error);
+    return writeScanState({
+      running: false,
+      trigger,
+      lastStatus: 'error',
+      lastError: error && error.message ? error.message : 'Scan failed.',
+      lastCompletedAt: failedAt,
+      lastCheckedId,
+      lastHitId,
+      lastHitsFound: hits,
+      lastCheckedCount: checked,
+      lastMissStreak: missStreak,
+    });
+  } finally {
+    scanRuntime.running = false;
+    scanRuntime.stopRequested = false;
+    scanRuntime.promise = null;
+  }
+}
+function startVideoScan(trigger = 'manual') {
+  if (scanRuntime.running) return false;
+  scanRuntime.promise = runVideoScan(trigger).catch(error => console.error('[auto-scan] unhandled:', error));
+  return true;
+}
+function checkScheduledScan() {
+  if (scanIsDue()) startVideoScan('scheduled');
+}
+
 const routes = {
   login: path.join(PUBLIC, 'login.html'),
   app: path.join(PUBLIC, 'app.html'),
@@ -366,6 +877,17 @@ async function handler(req, res) {
       return sendFile(res, COURSES_FILE, 'application/json; charset=utf-8');
     }
 
+
+    if (req.method === 'GET' && pathname === '/api/courses/version') {
+      if (!anyAccess(req)) return json(res, 401, { error: 'Authentication required.' });
+      let version = 'missing';
+      try {
+        const stat = fs.statSync(COURSES_FILE);
+        version = `${Math.floor(stat.mtimeMs)}-${stat.size}`;
+      } catch {}
+      return json(res, 200, { version, scanRunning: scanRuntime.running });
+    }
+
     if (req.method === 'GET' && pathname === '/api/labels') {
       if (!anyAccess(req)) return json(res, 401, { error: 'Authentication required.' });
       return json(res, 200, readLabels());
@@ -414,6 +936,44 @@ async function handler(req, res) {
       };
       writeLabels(labels);
       return json(res, 200, { ok: true, ...labels, stats: courseLabelStats() });
+    }
+
+    if (req.method === 'GET' && pathname === '/api/admin/infinity/status') {
+      return json(res, 200, infinityAuthStatus());
+    }
+
+    if (req.method === 'PUT' && pathname === '/api/admin/infinity/cookie') {
+      if (process.env.INFINITY_COOKIE) {
+        return json(res, 409, { error: 'INFINITY_COOKIE is set in the server environment. Remove it there before managing the cookie from this panel.' });
+      }
+      const body = await readJsonBody(req, 20 * 1024);
+      saveInfinityCookie(body.cookie);
+      return json(res, 200, { ok: true, ...infinityAuthStatus() });
+    }
+
+    if (req.method === 'POST' && pathname === '/api/admin/videos/fetch') {
+      const rl = rateLimit(req, 'admin-video-fetch', 30, 60 * 1000);
+      if (rl.blocked) return json(res, 429, { error: 'Too many fetch requests. Wait a minute and try again.' }, { 'Retry-After': rl.retryAfter });
+      const body = await readJsonBody(req);
+      const result = await fetchAndStoreVideo(body.videoId);
+      return json(res, result.action === 'added' ? 201 : 200, { ok: true, ...result });
+    }
+
+
+    if (req.method === 'GET' && pathname === '/api/admin/scan/status') {
+      return json(res, 200, scanStatus());
+    }
+
+    if (req.method === 'POST' && pathname === '/api/admin/scan/run') {
+      if (scanRuntime.running) return json(res, 409, { error: 'A scan is already running.', ...scanStatus() });
+      const started = startVideoScan('manual');
+      return json(res, 202, { ok: started, ...scanStatus() });
+    }
+
+    if (req.method === 'POST' && pathname === '/api/admin/scan/stop') {
+      if (!scanRuntime.running) return json(res, 409, { error: 'No scan is currently running.', ...scanStatus() });
+      scanRuntime.stopRequested = true;
+      return json(res, 202, { ok: true, message: 'Stop requested. The current batch will finish first.', ...scanStatus() });
     }
 
     if (req.method === 'GET' && pathname === '/api/admin/codes') {
@@ -500,4 +1060,9 @@ const server = http.createServer(handler);
 server.listen(PORT, () => {
   console.log(`Secure Course Search running on http://localhost:${PORT}`);
   console.log(`Admin panel: http://localhost:${PORT}/admin`);
+  console.log(`[auto-scan] ${AUTO_SCAN_ENABLED ? 'enabled' : 'disabled'} | every ${AUTO_SCAN_INTERVAL_HOURS}h | stop after ${AUTO_SCAN_MAX_MISSES} consecutive misses`);
+  if (AUTO_SCAN_ENABLED) {
+    setTimeout(checkScheduledScan, 15 * 1000).unref();
+    setInterval(checkScheduledScan, 60 * 1000).unref();
+  }
 });

@@ -1,8 +1,8 @@
 {
   "name": "secure-course-search",
-  "version": "1.3.0",
+  "version": "1.6.0",
   "private": true,
-  "description": "Private course CSV search with access codes and an admin panel.",
+  "description": "Private grade-aware course search with polished student UX, admin controls, and automatic daily Video-ID scanning.",
   "scripts": {
     "start": "node server.js",
     "check": "node --check server.js && node --check public/assets/login.js && node --check public/assets/app.js && node --check public/assets/admin.js && node --check scripts/setup.js",
