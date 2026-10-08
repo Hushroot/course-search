@@ -4,6 +4,7 @@ let CODES=[];
 let LABEL_INFO={subjects:{},teachers:{},stats:{subjects:[],teachers:[]}};
 let INFINITY_STATUS={configured:false,source:null,updatedAt:null};
 let SCAN_STATUS={running:false,lastStatus:'never',config:{maxConsecutiveMisses:1000}};
+let PLAYBACK_SETTINGS={siteOrigin:'',referrerPolicy:'origin'};
 const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 function expired(c){return Boolean(c.expiresAt&&Date.now()>=new Date(c.expiresAt).getTime())}
 function exhausted(c){return Number.isFinite(c.maxUses)&&c.maxUses>0&&Number(c.uses||0)>=c.maxUses}
@@ -64,7 +65,25 @@ function renderScanStatus(){
   $('#runScanBtn').disabled=Boolean(s.running)||!INFINITY_STATUS.configured;$('#stopScanBtn').disabled=!s.running;
 }
 async function loadScanStatus(){SCAN_STATUS=await api('/api/admin/scan/status');renderScanStatus()}
-async function loadAdminData(){await Promise.all([loadCodes(),loadLabels(),loadInfinityStatus(),loadScanStatus()]);renderScanStatus()}
+async function loadPlaybackSettings(){
+  PLAYBACK_SETTINGS=await api('/api/admin/playback/settings');
+  $('#playbackSiteOrigin').value=PLAYBACK_SETTINGS.siteOrigin||'';
+  $('#playbackReferrerPolicy').value=PLAYBACK_SETTINGS.referrerPolicy||'origin';
+  $('#playbackStatus').textContent=PLAYBACK_SETTINGS.siteOrigin?'Configured':'Use current domain';
+  $('#playbackStatus').className='infinity-status on';
+}
+async function loadPlaybackGuide(){
+  const guide=await api('/api/admin/playback/guide');
+  $('#guideEnabled').checked=guide.enabled!==false;
+  $('#guideTitle').value=guide.title||'';
+  $('#guideIntro').value=guide.introduction||'';
+  $('#guideSteps').value=guide.steps||'';
+  $('#guideCode').value=guide.code||'';
+  $('#guideStatus').textContent=guide.enabled===false?'Hidden':'Published';
+  $('#guideStatus').className='infinity-status '+(guide.enabled===false?'off':'on');
+  $('#guideSaved').textContent='';$('#guideError').textContent='';
+}
+async function loadAdminData(){await Promise.all([loadCodes(),loadLabels(),loadInfinityStatus(),loadScanStatus(),loadPlaybackSettings(),loadPlaybackGuide()]);renderScanStatus()}
 async function saveLabels(){
   const btn=$('#saveLabels');btn.disabled=true;$('#labelsError').textContent='';$('#labelsSaved').textContent='';
   try{
@@ -80,6 +99,60 @@ async function rowAction(action,id){$('#tableError').textContent='';try{if(actio
 $('#adminLoginForm').addEventListener('submit',async e=>{e.preventDefault();const btn=$('#adminLoginBtn');btn.disabled=true;$('#adminLoginError').textContent='';try{await api('/api/admin/login',{method:'POST',body:JSON.stringify({password:$('#password').value})});$('#password').value='';showPanel();await loadAdminData()}catch(err){$('#adminLoginError').textContent=err.message}finally{btn.disabled=false}});
 $('#createForm').addEventListener('submit',async e=>{e.preventDefault();const btn=$('#createBtn');btn.disabled=true;$('#createError').textContent='';try{const body={label:$('#label').value,maxUses:$('#maxUses').value||null,expiresAt:$('#expiresAt').value?new Date($('#expiresAt').value).toISOString():null,code:$('#customCode').value||null};const j=await api('/api/admin/codes',{method:'POST',body:JSON.stringify(body)});$('#newCode').textContent=j.code;$('#newCodeBox').classList.add('show');$('#customCode').value='';await loadCodes()}catch(err){$('#createError').textContent=err.message}finally{btn.disabled=false}});
 $('#copyCode').addEventListener('click',async()=>{await navigator.clipboard?.writeText($('#newCode').textContent);$('#copyCode').textContent='Copied';setTimeout(()=>$('#copyCode').textContent='Copy',1000)});
+$('#playbackSettingsForm').addEventListener('submit',async e=>{
+  e.preventDefault();
+  const btn=$('#savePlaybackSettings');btn.disabled=true;
+  $('#playbackError').textContent='';$('#playbackSaved').textContent='';
+  try{
+    PLAYBACK_SETTINGS=await api('/api/admin/playback/settings',{method:'PUT',body:JSON.stringify({
+      siteOrigin:$('#playbackSiteOrigin').value.trim(),
+      referrerPolicy:$('#playbackReferrerPolicy').value,
+    })});
+    await loadPlaybackSettings();
+    $('#playbackSaved').textContent='Saved to persistent storage. Students get the new setting on their next visit.';
+  }catch(err){$('#playbackError').textContent=err.message}
+  finally{btn.disabled=false}
+});
+$('#loadBunnyEmbed').addEventListener('click',async()=>{
+  const id=Number($('#bunnyVideoId').value);
+  $('#bunnyEmbedError').textContent='';$('#bunnyEmbedSaved').textContent='';
+  if(!Number.isSafeInteger(id)||id<1){$('#bunnyEmbedError').textContent='Enter a numeric Video ID first.';return}
+  try{
+    const j=await api('/api/admin/videos/embed?videoId='+encodeURIComponent(id));
+    $('#bunnyEmbedUrl').value=j.embedUrl||'';
+    $('#bunnyEmbedSaved').textContent=(j.videoName||'Video')+(j.embedUrl?' · embed loaded':' · no embed assigned');
+  }catch(err){$('#bunnyEmbedError').textContent=err.message}
+});
+$('#bunnyEmbedForm').addEventListener('submit',async e=>{
+  e.preventDefault();
+  const btn=$('#saveBunnyEmbed');btn.disabled=true;
+  $('#bunnyEmbedError').textContent='';$('#bunnyEmbedSaved').textContent='';
+  try{
+    const j=await api('/api/admin/videos/embed',{method:'PUT',body:JSON.stringify({videoId:Number($('#bunnyVideoId').value),embedUrl:$('#bunnyEmbedUrl').value.trim()})});
+    $('#bunnyEmbedUrl').value=j.embedUrl||'';
+    $('#bunnyEmbedSaved').textContent=j.embedUrl?'Saved for '+(j.videoName||('Video #'+j.videoId))+' · available in student player':'Manual embed cleared.';
+  }catch(err){$('#bunnyEmbedError').textContent=err.message}
+  finally{btn.disabled=false}
+});
+$('#playbackGuideForm').addEventListener('submit',async e=>{
+  e.preventDefault();
+  const btn=$('#saveGuideBtn');btn.disabled=true;
+  $('#guideError').textContent='';$('#guideSaved').textContent='';
+  try{
+    const guide=await api('/api/admin/playback/guide',{method:'PUT',body:JSON.stringify({
+      enabled:$('#guideEnabled').checked,
+      title:$('#guideTitle').value,
+      introduction:$('#guideIntro').value,
+      steps:$('#guideSteps').value,
+      code:$('#guideCode').value,
+    })});
+    $('#guideStatus').textContent=guide.enabled?'Published':'Hidden';
+    $('#guideStatus').className='infinity-status '+(guide.enabled?'on':'off');
+    $('#guideSaved').textContent='Saved. Students will see the updated guide next time they open it.';
+  }catch(err){$('#guideError').textContent=err.message}
+  finally{btn.disabled=false}
+});
+$('#reloadGuideBtn').addEventListener('click',()=>loadPlaybackGuide().catch(e=>$('#guideError').textContent=e.message));
 $('#saveLabels').addEventListener('click',saveLabels);
 $('#cookieForm').addEventListener('submit',async e=>{
   e.preventDefault();

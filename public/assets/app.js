@@ -5,6 +5,11 @@ let LESSONS=new Map();
 let LABELS={subjects:{},teachers:{}};
 let DATA_VERSION=null;
 let SESSION=null;
+let PLAYBACK_SETTINGS={siteOrigin:'',referrerPolicy:'origin'};
+let WATCH_ID=null;
+let WATCH_LAST_FOCUS=null;
+let WATCH_REFRESHING=false;
+let WATCH_GUIDE=null;
 
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
@@ -64,8 +69,8 @@ function resourceKind(x){
   if(hay.includes('.pdf')||hay.includes('pdf'))return 'pdf';
   if(hay.includes('quiz')||hay.includes('test')||hay.includes('exam'))return 'quiz';
   if(hay.match(/\.(jpg|jpeg|png|webp|gif)\b/)||hay.includes('image'))return 'image';
+  if(hay.includes('video')||hay.includes('youtube')||hay.includes('session')||hay.includes('lecture')||hay.includes('vid'))return 'video';
   if(hay.includes('link'))return 'link';
-  if(hay.includes('video')||hay.includes('session')||hay.includes('lecture')||hay.includes('vid'))return 'video';
   return x.download?'link':'file';
 }
 
@@ -208,13 +213,166 @@ function syncControls(){
   $('#clear').classList.toggle('hidden',!state.q);
 }
 
+function safeExternalUrl(raw){
+  try{const u=new URL(String(raw||''));return ['https:','http:'].includes(u.protocol)?u.href:''}catch{return ''}
+}
+function isVideoResource(x){
+  if(x.embedUrl)return true;
+  const url=String(x.download||x.path||'').toLowerCase().split('?')[0];
+  return resourceKind(x)==='video'||/\.(mp4|webm|m3u8|mov|m4v)$/.test(url);
+}
+function safeBunnyEmbed(raw){
+  try{
+    const u=new URL(String(raw||''));
+    return u.protocol==='https:'&&u.hostname==='iframe.mediadelivery.net'&&/^\/embed\/\d+\/[0-9a-f-]{36}\/?$/i.test(u.pathname)?u.href:'';
+  }catch{return ''}
+}
+function playbackReferrerPolicy(){
+  return ['origin','strict-origin-when-cross-origin','no-referrer'].includes(PLAYBACK_SETTINGS.referrerPolicy)?PLAYBACK_SETTINGS.referrerPolicy:'origin';
+}
+function setWatchError(message){
+  const el=$('#watchError');el.textContent=message||'';el.classList.toggle('hidden',!message);
+}
+function updateWatchSource(x){
+  const video=$('#watchVideo');
+  const frame=$('#watchFrame');
+  const embed=safeBunnyEmbed(x?.embedUrl);
+  const url=safeExternalUrl(x?.download);
+  video.pause();video.removeAttribute('src');video.load();
+  // Remove the iframe src whenever it is hidden so the Bunny player stops playing.
+  frame.removeAttribute('src');
+  frame.referrerPolicy=playbackReferrerPolicy();
+  frame.classList.toggle('hidden',!embed);
+  video.referrerPolicy=playbackReferrerPolicy();
+  $('#watchOpenExternal').referrerPolicy=playbackReferrerPolicy();
+  const source=embed||url;
+  $('#watchOpenExternal').classList.toggle('hidden',!source);
+  if(source)$('#watchOpenExternal').href=source;
+  else $('#watchOpenExternal').removeAttribute('href');
+  if(embed){
+    frame.src=embed;
+  }else if(url){
+    video.src=url;
+    video.load();
+  }
+  video.classList.toggle('hidden',Boolean(embed)||!url);
+  $('#watchPlaceholder').classList.toggle('hidden',Boolean(source));
+  if(!source)setWatchError('This resource does not currently have a playable link. You can request a fresh one.');
+}
+async function loadWatchGuide(){
+  const section=$('#watchHelpSection');
+  section.classList.add('hidden');
+  try{
+    const response=await fetch('/api/playback/guide',{cache:'no-store'});
+    if(!response.ok)return;
+    const guide=await response.json();
+    if(!guide.enabled)return;
+    WATCH_GUIDE=guide;
+    $('#watchHelpTitle').textContent=guide.title||'Playback help';
+    $('#watchHelpIntro').textContent=guide.introduction||'';
+    $('#watchHelpSteps').textContent=guide.steps||'';
+    $('#watchHelpCode').textContent=guide.code||'';
+    $('#watchHelpCodeWrap').classList.toggle('hidden',!guide.code);
+    section.classList.remove('hidden');
+  }catch{}
+}
+function toggleWatchGuide(force){
+  const panel=$('#watchHelpPanel');
+  const opening=typeof force==='boolean'?force:panel.classList.contains('hidden');
+  panel.classList.toggle('hidden',!opening);
+  $('#watchHelpToggle').setAttribute('aria-expanded',String(opening));
+}
+function openWatch(videoId){
+  const x=DATA.find(r=>String(r.id)===String(videoId));
+  if(!x)return toast('Video not found in this library.','error');
+  WATCH_ID=Number(x.id);WATCH_LAST_FOCUS=document.activeElement;
+  WATCH_GUIDE=null;toggleWatchGuide(false);loadWatchGuide();
+  $('#watchTitle').textContent=x.video||x.topic||'Course video';
+  $('#watchSubtitle').textContent=[x.lesson,x.topic].filter(Boolean).join(' · ')||'Course video';
+  $('#watchId').textContent=`Video ID #${x.id}`;
+  setWatchError('');updateWatchSource(x);
+  const configured=PLAYBACK_SETTINGS.siteOrigin;
+  if(configured&&configured!==location.origin){
+    setWatchError(`This site is running on ${location.origin}, but admin configured ${configured}. The browser sends its real origin, not the configured one. If playback fails, ask the admin to check the allowed CDN domains.`);
+  }
+  $('#watchOverlay').classList.remove('hidden');
+  $('#watchOverlay').setAttribute('aria-hidden','false');
+  document.body.classList.add('watch-open');
+  $('#watchClose').focus();
+}
+function closeWatch(){
+  const video=$('#watchVideo');video.pause();video.removeAttribute('src');video.load();
+  $('#watchFrame').removeAttribute('src');
+  $('#watchOverlay').classList.add('hidden');$('#watchOverlay').setAttribute('aria-hidden','true');
+  document.body.classList.remove('watch-open');WATCH_ID=null;
+  WATCH_LAST_FOCUS?.focus?.();
+}
+async function refreshVideo(videoId,button){
+  if(WATCH_REFRESHING)return;
+  WATCH_REFRESHING=true;
+  if(button)button.disabled=true;
+  $('#watchRefresh').disabled=true;
+  const original=button?.textContent;
+  if(button)button.textContent='Refreshing…';
+  $('#watchRefresh').textContent='Refreshing…';
+  setWatchError('');
+  try{
+    const response=await fetch('/api/videos/refresh',{
+      method:'POST',cache:'no-store',credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({videoId:Number(videoId)}),
+    });
+    const data=await response.json().catch(()=>({}));
+    if(response.status===401){location.href='/';return}
+    if(!response.ok)throw new Error(data.error||'Unable to refresh the video.');
+    const i=DATA.findIndex(x=>String(x.id)===String(videoId));
+    if(i>=0){
+      const old=DATA[i],updated={...old,...data.record};
+      updated._search=norm([updated.id,updated.topicId,updated.lessonId,updated.video,updated.topic,updated.lesson,updated.teacher,updated.subject,updated.subjectName,updated.teacherName,updated.section,updated.type,updated.description,updated.topicDescription].join(' '));
+      DATA[i]=updated;
+      const oldKey=lessonKey(old),newKey=lessonKey(updated);
+      if(LESSONS.has(oldKey))LESSONS.set(oldKey,LESSONS.get(oldKey).filter(x=>String(x.id)!==String(videoId)));
+      if(!LESSONS.has(newKey))LESSONS.set(newKey,[]);
+      LESSONS.get(newKey).push(updated);
+      if(WATCH_ID===Number(videoId)){
+        updateWatchSource(updated);
+        if(!safeExternalUrl(updated.download)&&!safeBunnyEmbed(updated.embedUrl))setWatchError('Metadata refreshed, but no playable link was returned. You may need to open the video through the provider.');
+      }
+    }
+    const version=await fetch('/api/courses/version',{cache:'no-store'}).then(r=>r.ok?r.json():null).catch(()=>null);
+    if(version?.version)DATA_VERSION=version.version;
+    const expanded=new Set($$('.v2-lesson[open]').map(el=>el.dataset.key));
+    render();
+    $$('.v2-lesson').forEach(el=>{if(expanded.has(el.dataset.key))el.open=true});
+    if(!data.linkReturned){
+      if(WATCH_ID===Number(videoId))setWatchError('The provider refreshed the metadata but did not return a new video link. Use its official player or ask the admin to check access.');
+      toast('Metadata updated, but no new video link was returned.','neutral');
+    }else if(!data.linkUpdated){
+      if(WATCH_ID===Number(videoId))setWatchError('The provider returned the same video link. If playback still fails, the CDN may reject this domain or the token may be invalid.');
+      toast('Provider returned the same link.','neutral');
+    }else toast('New video link saved. Try playing it again.');
+  }catch(err){
+    if(WATCH_ID===Number(videoId))setWatchError(err.message);
+    toast(err.message,'error');
+  }finally{
+    WATCH_REFRESHING=false;
+    if(button){button.disabled=false;button.textContent=original}
+    $('#watchRefresh').disabled=false;$('#watchRefresh').textContent='↻ Refresh video link';
+  }
+}
+
 function resourceRow(x,index,matchedIds){
   const kind=resourceKind(x);
   const match=matchedIds.has(String(x.id));
+  const url=safeBunnyEmbed(x.embedUrl)||safeExternalUrl(x.download);
+  const video=isVideoResource(x);
   return `<article class="v2-resource ${match?'matched':''}">
     <div class="resource-kind ${kind}">${icon(kind)}</div>
     <div class="resource-copy"><strong>${esc(x.video||x.topic||'Untitled resource')}</strong><div><span>#${esc(x.id)}</span>${x.topic?`<span>${esc(x.topic)}</span>`:''}${x.type?`<span>${esc(x.type)}</span>`:''}${match?'<em>match</em>':''}</div></div>
-    ${x.download?`<a class="resource-action" href="${esc(x.download)}" target="_blank" rel="noopener noreferrer"><span>Open</span>${icon('external')}</a>`:`<span class="resource-unavailable">No direct link</span>`}
+    <div class="resource-buttons">
+      ${video?`<button class="resource-action resource-watch" data-watch="${esc(x.id)}" type="button">${icon('video')}<span>Watch</span></button>`:''}
+      ${url?`<a class="resource-action" href="${esc(url)}" target="_blank" rel="noopener" referrerpolicy="${esc(playbackReferrerPolicy())}"><span>Open</span>${icon('external')}</a>`:!video?'<span class="resource-unavailable">No direct link</span>':''}
+      ${video?`<button class="resource-retry" data-refresh="${esc(x.id)}" type="button" title="Request an updated video link">↻</button>`:''}
+    </div>
   </article>`;
 }
 
@@ -285,6 +443,8 @@ async function boot(){
     if([sessionRes,dataRes,labelsRes,versionRes].some(r=>r.status===401)){location.href='/';return}
     if([sessionRes,dataRes,labelsRes,versionRes].some(r=>!r.ok))throw new Error('Could not load the private library.');
     SESSION=await sessionRes.json();DATA=await dataRes.json();LABELS=await labelsRes.json();DATA_VERSION=(await versionRes.json()).version||null;
+    try{const settings=await fetch('/api/playback/settings',{cache:'no-store'});if(settings.ok)PLAYBACK_SETTINGS=await settings.json()}catch{}
+    $('#siteReferrerPolicy').content=playbackReferrerPolicy();
     for(const x of DATA){
       x.subjectName=displaySubject(x.subject);x.teacherName=displayTeacher(x.teacher);
       x._search=norm([x.id,x.topicId,x.lessonId,x.video,x.topic,x.lesson,x.teacher,x.subject,x.subjectName,x.teacherName,x.section,x.type,x.description,x.topicDescription].join(' '));
@@ -299,6 +459,25 @@ async function boot(){
     if(!GRADES[saved])openGradeGate();
   }catch(e){$('#loading').innerHTML=`<span>${esc(e.message)}</span>`}
 }
+
+$('#results').addEventListener('click',e=>{
+  const watch=e.target.closest('[data-watch]');
+  if(watch){openWatch(watch.dataset.watch);return}
+  const refresh=e.target.closest('[data-refresh]');
+  if(refresh){refreshVideo(refresh.dataset.refresh,refresh)}
+});
+$('#watchHelpToggle').addEventListener('click',()=>toggleWatchGuide());
+$('#watchHelpCopy').addEventListener('click',async()=>{
+  const btn=$('#watchHelpCopy');
+  try{await navigator.clipboard.writeText($('#watchHelpCode').textContent);btn.textContent='Copied!';setTimeout(()=>btn.textContent='Copy code',1400)}
+  catch{toast('Could not copy automatically. Select the code and copy it manually.','error')}
+});
+$('#watchClose').addEventListener('click',closeWatch);
+$('#watchOverlay').addEventListener('click',e=>{if(e.target===$('#watchOverlay'))closeWatch()});
+$('#watchRefresh').addEventListener('click',()=>{if(WATCH_ID!==null)refreshVideo(WATCH_ID,$('#watchRefresh'))});
+$('#watchVideo').addEventListener('error',()=>{
+  if(WATCH_ID!==null)setWatchError('This video could not be loaded. Its link may have expired, or the CDN may reject this domain, token, or session. Press Refresh video link to fetch its Video ID again.');
+});
 
 let searchTimer;
 $('#q').addEventListener('input',e=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.q=e.target.value;state.limit=30;render()},70)});
@@ -318,7 +497,8 @@ $('#profileBtn').onclick=e=>{e.stopPropagation();const m=$('#profileMenu');m.cla
 document.addEventListener('click',e=>{if(!e.target.closest('.v2-top-actions'))$('#profileMenu').classList.add('hidden')});
 $('#logoutBtn').onclick=async()=>{await fetch('/api/logout',{method:'POST'});location.href='/'};
 document.addEventListener('keydown',e=>{
-  if((e.key==='/'||(e.ctrlKey&&e.key.toLowerCase()==='k'))&&!['INPUT','SELECT','TEXTAREA'].includes(document.activeElement?.tagName)){e.preventDefault();$('#q').focus()}
+  if($('#watchOverlay').classList.contains('hidden')&&(e.key==='/'||(e.ctrlKey&&e.key.toLowerCase()==='k'))&&!['INPUT','SELECT','TEXTAREA'].includes(document.activeElement?.tagName)){e.preventDefault();$('#q').focus()}
+  if(e.key==='Escape'&&!$('#watchOverlay').classList.contains('hidden')){closeWatch();return}
   if(e.key==='Escape'&&$('#gradeGate').classList.contains('open')&&localStorage.getItem(GRADE_KEY))closeGradeGate();
 });
 setInterval(async()=>{
