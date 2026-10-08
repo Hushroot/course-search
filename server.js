@@ -36,6 +36,8 @@ const LABELS_FILE = path.join(STATE_DIR, 'labels.json');
 const COURSES_FILE = path.join(STATE_DIR, 'courses.json');
 const INFINITY_AUTH_FILE = path.join(STATE_DIR, 'infinity-auth.json');
 const SCAN_STATE_FILE = path.join(STATE_DIR, 'scan-state.json');
+const PLAYBACK_GUIDE_FILE = path.join(STATE_DIR, 'playback-guide.json');
+const PLAYBACK_SETTINGS_FILE = path.join(STATE_DIR, 'playback-settings.json');
 
 fs.mkdirSync(STATE_DIR, { recursive: true });
 if (!fs.existsSync(CODES_FILE)) fs.writeFileSync(CODES_FILE, '[]\n');
@@ -53,6 +55,36 @@ function atomicWriteJson(filePath, value, mode) {
   fs.renameSync(tmp, filePath);
   if (mode) { try { fs.chmodSync(filePath, mode); } catch {} }
 }
+// Editable student playback/Colab help. Content is plain text, never executable HTML.
+const DEFAULT_PLAYBACK_GUIDE = {
+  enabled: true,
+  title: 'Video not playing? Try these steps',
+  introduction: 'First use Watch or Refresh video link. If you have a video URL you are permitted to download, you can use Google Colab to save it for offline viewing.',
+  steps: '1. Press Refresh video link once, then try Watch again.\n2. If you see 403 Forbidden or an expired token, use the official course player or ask the course provider for access.\n3. For a video you own or are explicitly allowed to download, open Google Colab and create a new notebook.\n4. Paste the example Python code below into a cell. Replace VIDEO_URL with your authorized direct download URL, then run the cell.\n5. Find the resulting file in the Colab Files sidebar. Download it to your device if your permissions allow.',
+  code: 'import requests\n\n# Use a direct MP4 URL you are authorized to download.\nvideo_url = "PASTE_YOUR_AUTHORIZED_VIDEO_URL_HERE"\noutput_filename = "course_video.mp4"\n\nwith requests.get(video_url, stream=True, timeout=60) as response:\n    response.raise_for_status()\n    with open(output_filename, "wb") as output:\n        for chunk in response.iter_content(chunk_size=1024 * 1024):\n            if chunk:\n                output.write(chunk)\nprint("Saved:", output_filename)',
+  updatedAt: null,
+};
+function readPlaybackGuide() {
+  const saved = readJsonFile(PLAYBACK_GUIDE_FILE, null);
+  if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return { ...DEFAULT_PLAYBACK_GUIDE };
+  return { ...DEFAULT_PLAYBACK_GUIDE, ...saved };
+}
+function savePlaybackGuide(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw Object.assign(new Error('Invalid guide settings.'), { status: 400 });
+  const fields = { title: 140, introduction: 1500, steps: 12000, code: 16000 };
+  const out = { enabled: body.enabled === true };
+  for (const [key, max] of Object.entries(fields)) {
+    if (typeof body[key] !== 'string' || body[key].length > max) {
+      throw Object.assign(new Error(`Invalid ${key}: expected text of at most ${max} characters.`), { status: 400 });
+    }
+    out[key] = body[key].trim();
+  }
+  if (!out.title) throw Object.assign(new Error('Guide title cannot be empty.'), { status: 400 });
+  out.updatedAt = nowIso();
+  atomicWriteJson(PLAYBACK_GUIDE_FILE, out);
+  return out;
+}
+
 function mergeBundledCoursesIntoState() {
   const bundled = readJsonFile(BUNDLED_COURSES_FILE, []);
   if (!Array.isArray(bundled)) return;
@@ -93,6 +125,131 @@ if (SESSION_SECRET.length < 32 || SESSION_SECRET.startsWith('replace-with-')) {
   console.error('SESSION_SECRET must be set to a random secret with at least 32 characters.');
   process.exit(1);
 }
+
+
+// Browser-controlled referrers cannot be spoofed by a setting. The configured
+// origin is a deployment diagnostic; playback uses the real page origin.
+const PLAYBACK_POLICIES = new Set(['origin', 'strict-origin-when-cross-origin', 'no-referrer']);
+
+// Bunny Stream's official iframe player is an authorized embed, not a raw MP4 proxy.
+// Accept either a URL or the iframe snippet supplied by the video owner.
+function normalizeBunnyEmbed(value) {
+  let raw = String(value || '').trim();
+  if (!raw) return null;
+  if (raw.length > 8192) throw Object.assign(new Error('Embed input is too long.'), { status: 400 });
+  if (raw.startsWith('<')) {
+    const match = raw.match(/<iframe\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/i);
+    if (!match) throw Object.assign(new Error('Paste a Bunny iframe or a Bunny embed URL.'), { status: 400 });
+    raw = match[1].replace(/&amp;/gi, '&');
+  }
+  let url;
+  try { url = new URL(raw); } catch { throw Object.assign(new Error('Invalid Bunny embed URL.'), { status: 400 }); }
+  if (url.protocol !== 'https:' || url.hostname !== 'iframe.mediadelivery.net' || url.port || url.username || url.password || url.hash ||
+      !/^\/embed\/\d{1,12}\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i.test(url.pathname)) {
+    throw Object.assign(new Error('Only official https://iframe.mediadelivery.net/embed/{library}/{video-guid} links are allowed.'), { status: 400 });
+  }
+  return url.toString();
+}
+function explicitBunnyEmbed(videoJson, fileJson) {
+  const video = safeDict(videoJson, 'video');
+  const file = safeDict(fileJson, 'file');
+  for (const candidate of [video.embed_url, video.iframe_url, video.player_url, video.embed, file.embed_url, file.iframe_url,
+      videoJson && videoJson.embed_url, fileJson && fileJson.embed_url]) {
+    if (typeof candidate !== 'string' || !candidate.trim()) continue;
+    try { return normalizeBunnyEmbed(candidate); } catch {}
+  }
+  return null;
+}
+function getVideoForAdmin(videoId) {
+  const id = Number(videoId);
+  if (!Number.isSafeInteger(id) || id < 1) throw Object.assign(new Error('Enter a valid numeric Video ID.'), { status: 400 });
+  const courses = readJsonFile(COURSES_FILE, []);
+  const row = Array.isArray(courses) ? courses.find(x => x && Number(x.id) === id) : null;
+  if (!row) throw Object.assign(new Error('Video ID not found in the library.'), { status: 404 });
+  return row;
+}
+function setVideoEmbed(videoId, value) {
+  const existing = getVideoForAdmin(videoId);
+  const embedUrl = normalizeBunnyEmbed(value);
+  const courses = readJsonFile(COURSES_FILE, []);
+  const i = courses.findIndex(x => x && Number(x.id) === Number(existing.id));
+  // A blank value removes the manual override. Subsequent API refreshes may repopulate it.
+  courses[i] = { ...courses[i], embedUrl, embedManual: Boolean(embedUrl), embedUpdatedAt: nowIso() };
+  atomicWriteJson(COURSES_FILE, courses);
+  return courses[i];
+}
+function normalizeSiteOrigin(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (raw.length > 300) throw Object.assign(new Error('Site URL is too long.'), { status: 400 });
+  let url;
+  try { url = new URL(raw); } catch { throw Object.assign(new Error('Enter a valid HTTPS website URL.'), { status: 400 }); }
+  const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  if ((url.protocol !== 'https:' && !(local && url.protocol === 'http:')) || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
+    throw Object.assign(new Error('Use an HTTPS site origin only (example: https://your-site.up.railway.app).'), { status: 400 });
+  }
+  return url.origin;
+}
+function readPlaybackSettings() {
+  const value = readJsonFile(PLAYBACK_SETTINGS_FILE, {});
+  return {
+    siteOrigin: typeof value.siteOrigin === 'string' ? value.siteOrigin : '',
+    referrerPolicy: PLAYBACK_POLICIES.has(value.referrerPolicy) ? value.referrerPolicy : 'origin',
+    updatedAt: value.updatedAt || null,
+  };
+}
+function savePlaybackSettings(body) {
+  const settings = {
+    siteOrigin: normalizeSiteOrigin(body.siteOrigin),
+    referrerPolicy: String(body.referrerPolicy || 'origin'),
+    updatedAt: nowIso(),
+  };
+  if (!PLAYBACK_POLICIES.has(settings.referrerPolicy)) {
+    throw Object.assign(new Error('Invalid referrer policy.'), { status: 400 });
+  }
+  atomicWriteJson(PLAYBACK_SETTINGS_FILE, settings, 0o600);
+  return settings;
+}
+
+// A user may only refresh an existing resource, never enumerate arbitrary IDs.
+// Requests are limited per session/IP and per ID to protect the upstream.
+const videoRefreshCooldown = new Map();
+const videoRefreshPending = new Map();
+const REFRESH_COOLDOWN_MS = 90 * 1000;
+async function refreshExistingVideo(videoId) {
+  const id = Number(videoId);
+  if (!Number.isSafeInteger(id) || id < 1) throw Object.assign(new Error('Invalid video ID.'), { status: 400 });
+  const courses = readJsonFile(COURSES_FILE, []);
+  if (!Array.isArray(courses) || !courses.some(x => x && Number(x.id) === id)) {
+    throw Object.assign(new Error('This video is not in the course library.'), { status: 404 });
+  }
+  if (videoRefreshPending.has(id)) return videoRefreshPending.get(id);
+  const last = videoRefreshCooldown.get(id) || 0;
+  const wait = REFRESH_COOLDOWN_MS - (Date.now() - last);
+  if (wait > 0) throw Object.assign(new Error(`Recently refreshed. Try again in ${Math.ceil(wait / 1000)} seconds.`), { status: 429 });
+  videoRefreshCooldown.set(id, Date.now());
+  const promise = (async () => {
+    const previous = courses.find(x => x && Number(x.id) === id);
+    const fresh = await fetchVideoForScan(id);
+    if (fresh.kind !== 'hit') throw Object.assign(new Error('The provider returned no usable data for this Video ID.'), { status: 404 });
+    upsertCourseRecords([fresh.record]);
+    const updated = readJsonFile(COURSES_FILE, []).find(x => x && Number(x.id) === id);
+    const newLink = fresh.record.download || null;
+    return {
+      ok: true, action: 'updated', record: updated,
+      linkUpdated: Boolean((newLink && newLink !== previous.download) || (updated.embedUrl && updated.embedUrl !== previous.embedUrl)),
+      linkReturned: Boolean(newLink || updated.embedUrl),
+    };
+  })();
+  videoRefreshPending.set(id, promise);
+  try { return await promise; }
+  catch (err) { videoRefreshCooldown.delete(id); throw err; }
+  finally { videoRefreshPending.delete(id); }
+}
+setInterval(() => {
+  const cutoff = Date.now() - REFRESH_COOLDOWN_MS;
+  for (const [id, time] of videoRefreshCooldown) if (time < cutoff) videoRefreshCooldown.delete(id);
+}, 5 * 60 * 1000).unref();
 
 function nowIso() { return new Date().toISOString(); }
 function b64url(input) { return Buffer.from(input).toString('base64url'); }
@@ -251,10 +408,10 @@ function cookie(name, value, opts = {}) {
 function securityHeaders(res) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; connect-src 'self'; media-src 'self' https:; frame-src https://iframe.mediadelivery.net; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
 }
 function json(res, status, body, extraHeaders = {}) {
   securityHeaders(res);
@@ -468,6 +625,7 @@ function parseInfinityRecord(videoId, fileResponse, videoResponse) {
     denied,
     type: cleanText(file.type_detail || file.type || video.type_detail || video.type, 120),
     download,
+    embedUrl: denied ? null : explicitBunnyEmbed(videoJson, fileJson),
     path: cleanText(file.video_path || video.video_path || video.path, 1000),
     thumb: absoluteInfinityUrl(topic.thumbnail || file.thumbnail || lesson.thumbnail),
     lessonThumb: absoluteInfinityUrl(lesson.thumbnail),
@@ -484,6 +642,8 @@ function usefulCourseRecord(row) {
 function mergeNonEmpty(oldRow, newRow) {
   const merged = { ...(oldRow || {}) };
   for (const [key, value] of Object.entries(newRow || {})) {
+    // Admin-supplied Bunny embeds survive daily scans and user-triggered refreshes.
+    if (key === 'embedUrl' && oldRow?.embedManual) continue;
     if (value !== null && value !== undefined && value !== '') merged[key] = value;
     else if (!(key in merged)) merged[key] = value;
   }
@@ -888,6 +1048,28 @@ async function handler(req, res) {
       return json(res, 200, { version, scanRunning: scanRuntime.running });
     }
 
+    if (req.method === 'GET' && pathname === '/api/playback/guide') {
+      if (!anyAccess(req)) return json(res, 401, { error: 'Authentication required.' });
+      const guide = readPlaybackGuide();
+      return json(res, 200, guide.enabled ? guide : { enabled: false });
+    }
+
+    if (req.method === 'GET' && pathname === '/api/playback/settings') {
+      if (!anyAccess(req)) return json(res, 401, { error: 'Authentication required.' });
+      const settings = readPlaybackSettings();
+      return json(res, 200, { ...settings, actualOrigin: null });
+    }
+
+    if (req.method === 'POST' && pathname === '/api/videos/refresh') {
+      if (!anyAccess(req)) return json(res, 401, { error: 'Authentication required.' });
+      if (!sameOrigin(req)) return json(res, 403, { error: 'Cross-site request blocked.' });
+      const rl = rateLimit(req, 'student-video-refresh', 8, 60 * 1000);
+      if (rl.blocked) return json(res, 429, { error: 'Too many refresh attempts. Try again in a minute.' }, { 'Retry-After': rl.retryAfter });
+      const body = await readJsonBody(req);
+      const result = await refreshExistingVideo(body.videoId);
+      return json(res, 200, result);
+    }
+
     if (req.method === 'GET' && pathname === '/api/labels') {
       if (!anyAccess(req)) return json(res, 401, { error: 'Authentication required.' });
       return json(res, 200, readLabels());
@@ -936,6 +1118,32 @@ async function handler(req, res) {
       };
       writeLabels(labels);
       return json(res, 200, { ok: true, ...labels, stats: courseLabelStats() });
+    }
+
+    if (req.method === 'GET' && pathname === '/api/admin/playback/guide') {
+      return json(res, 200, readPlaybackGuide());
+    }
+    if (req.method === 'PUT' && pathname === '/api/admin/playback/guide') {
+      const body = await readJsonBody(req, 36 * 1024);
+      return json(res, 200, savePlaybackGuide(body));
+    }
+
+    if (req.method === 'GET' && pathname === '/api/admin/playback/settings') {
+      return json(res, 200, readPlaybackSettings());
+    }
+    if (req.method === 'PUT' && pathname === '/api/admin/playback/settings') {
+      const body = await readJsonBody(req);
+      return json(res, 200, savePlaybackSettings(body));
+    }
+
+    if (req.method === 'GET' && pathname === '/api/admin/videos/embed') {
+      const row = getVideoForAdmin(url.searchParams.get('videoId'));
+      return json(res, 200, { videoId: row.id, videoName: row.video || row.topic || '', embedUrl: row.embedUrl || '', embedManual: Boolean(row.embedManual) });
+    }
+    if (req.method === 'PUT' && pathname === '/api/admin/videos/embed') {
+      const body = await readJsonBody(req, 16 * 1024);
+      const row = setVideoEmbed(body.videoId, body.embedUrl);
+      return json(res, 200, { ok: true, videoId: row.id, videoName: row.video || row.topic || '', embedUrl: row.embedUrl || '', embedManual: Boolean(row.embedManual) });
     }
 
     if (req.method === 'GET' && pathname === '/api/admin/infinity/status') {

@@ -157,3 +157,45 @@ The student library is grade-aware and defaults to a first-visit grade picker. T
 
 Each grade has a distinct theme, dynamically scoped subjects/teachers, grade-specific stats, quick subject chips, favorites stored in the browser, sorting, responsive filters, and grouped lesson resources. The grade choice is stored in localStorage and can be changed from the header account menu at any time.
 
+
+## v1.7 browser playback and link recovery
+
+This version adds an in-page player for video resources and a **Refresh video link** action for students. The player uses the browser's **real origin** as the HTTP `Referer` where the browser and CDN allow it. `Referrer-Policy` is now `strict-origin-when-cross-origin` at the page level; the playback preference defaults to `origin` for video and external-link elements. The CSP permits HTTPS media.
+
+Admin → **Video playback & site domain** allows setting:
+
+- **Public website origin**: the expected HTTPS domain, e.g. `https://course-search-production-2aa6.up.railway.app`. This is used to detect when the site was moved; it **does not spoof** the browser's actual `Referer` header. Leave blank to accept the current page origin.
+- **Browser referrer policy**: `origin` (recommended), `strict-origin-when-cross-origin`, or `no-referrer`. This controls what browsers are permitted to send, not what the destination CDN must accept.
+
+Both settings are persisted at `STATE_DIR/playback-settings.json`, so changing the Railway domain does not require redeploying. The CDN operator must allow the **actual** site origin; changing these settings cannot bypass CDN allowlists, expired tokens, IP binding, or access controls. Some video formats or cross-origin playback configurations may require the provider's official player.
+
+Students can click **Watch** beside a video resource. If playback fails, the player displays an error and **Refresh video link**. The refresh button:
+
+1. Requires a valid Course Search access-code or admin session.
+2. Accepts **only an ID already in the course database**; it cannot enumerate other IDs.
+3. Re-fetches the video's metadata from the existing authorized Infinity API, checks for authentication failures, and updates the persistent course record.
+4. Updates the in-page player and informs the student whether a **new** link was returned, the **same** link was returned, or no link was returned.
+5. Enforces a per-IP rate limit and a per-video 90-second cooldown to avoid excessive upstream requests.
+
+**No CDN proxy, forged `Referer`, or authorization bypass is implemented.** The Infinity cookie remains on the server and is never returned by the playback settings endpoint.
+
+Run `npm test` to execute the local integration test with a stub upstream service (no requests to the real provider).
+
+## Bunny Stream iframe embeds (v1.8)
+
+In `/admin` under **Bunny Stream embeds**, enter the existing numeric course Video ID and paste an official `https://iframe.mediadelivery.net/embed/<library-id>/<video-guid>` URL, or paste its full iframe HTML. Use **Load existing** to inspect an assignment and **Save embed** to persist it. The app stores the validated URL in `/data/courses.json`; no video files are copied or proxied.
+
+The student **Watch** button prefers the official Bunny iframe when one is assigned, falling back to a direct playable link when no embed is available. The existing **Refresh video link** button re-fetches the course metadata. Manually assigned embeds are preserved through daily scans and refreshes. The iframe is removed when the player closes to stop playback.
+
+Only official Bunny Stream iframe URLs are accepted; other hosts and arbitrary HTML are rejected. The CSP permits `frame-src https://iframe.mediadelivery.net` but retains `frame-ancestors 'none'`. The browser sends its actual origin under the chosen referrer policy, so CDN authorization and tokens remain required.
+
+The example iframe in the conversation has Bunny library ID `386` and video GUID `54864774-bc13-417a-862f-70e2a044d030`. Those identifiers do **not** identify the numeric Infinity course Video ID, so the admin must associate it with the correct resource.
+
+
+## v1.9: Admin-editable playback / Colab guide
+
+- Admin: visit `/admin` → **Playback help & Colab guide**. Edit the title, introduction, step-by-step instructions and optional Python code. Enable or hide the guide and click **Save student guide**.
+- Students: open a video → **Playback help & Colab guide**. The collapsible panel displays the latest saved instructions, with **Open Google Colab** and **Copy code** actions.
+- Guide content is **plain text** (not HTML) and is never executed in the website. The optional code is intended for use with videos that students are authorized to download.
+- Guide is stored at `STATE_DIR/playback-guide.json` on the Railway volume. Existing codes, teacher labels, and video metadata are unchanged.
+- Authenticated student access is required to read the guide. Only an authenticated admin can change it. No new Railway environment variables are needed.
