@@ -2,3 +2,6 @@
 *.log
 .DS_Store
 data/access-codes.json.tmp
+data/infinity-auth.json
+data/scan-state.json
+data/*.tmp
