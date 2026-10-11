@@ -8,8 +8,13 @@ let SESSION=null;
 let PLAYBACK_SETTINGS={siteOrigin:'',referrerPolicy:'origin'};
 let WATCH_ID=null;
 let WATCH_LAST_FOCUS=null;
-let WATCH_REFRESHING=false;
 let WATCH_GUIDE=null;
+let WATCH_VIEW_GENERATION=0;
+const PLAYBACK_REQUESTS=new PlaybackRequestState();
+let INFINITY_CONNECTED=false;
+let CONNECT_CONTROLLER=null;
+let CONNECT_LAST_FOCUS=null;
+let PENDING_WATCH=null;
 
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
@@ -95,7 +100,7 @@ function rowMatches(x,terms){
   if(state.type&&String(x.type)!==state.type)return false;
   if(state.access==='free'&&!truth(x.free))return false;
   if(state.access==='paid'&&truth(x.free))return false;
-  if(state.access==='link'&&!x.download)return false;
+  if(state.access==='link'&&!(x.hasLink??Boolean(x.download)))return false;
   return true;
 }
 
@@ -217,6 +222,7 @@ function safeExternalUrl(raw){
   try{const u=new URL(String(raw||''));return ['https:','http:'].includes(u.protocol)?u.href:''}catch{return ''}
 }
 function isVideoResource(x){
+  if(x.isVideo!==undefined)return x.isVideo;
   if(x.embedUrl)return true;
   const url=String(x.download||x.path||'').toLowerCase().split('?')[0];
   return resourceKind(x)==='video'||/\.(mp4|webm|m3u8|mov|m4v)$/.test(url);
@@ -244,11 +250,8 @@ function updateWatchSource(x){
   frame.referrerPolicy=playbackReferrerPolicy();
   frame.classList.toggle('hidden',!embed);
   video.referrerPolicy=playbackReferrerPolicy();
-  $('#watchOpenExternal').referrerPolicy=playbackReferrerPolicy();
   const source=embed||url;
   $('#watchOpenExternal').classList.toggle('hidden',!source);
-  if(source)$('#watchOpenExternal').href=source;
-  else $('#watchOpenExternal').removeAttribute('href');
   if(embed){
     frame.src=embed;
   }else if(url){
@@ -257,15 +260,16 @@ function updateWatchSource(x){
   }
   video.classList.toggle('hidden',Boolean(embed)||!url);
   $('#watchPlaceholder').classList.toggle('hidden',Boolean(source));
-  if(!source)setWatchError('This resource does not currently have a playable link. You can request a fresh one.');
 }
 async function loadWatchGuide(){
+  const generation=WATCH_VIEW_GENERATION;
   const section=$('#watchHelpSection');
   section.classList.add('hidden');
   try{
     const response=await fetch('/api/playback/guide',{cache:'no-store'});
     if(!response.ok)return;
     const guide=await response.json();
+    if(generation!==WATCH_VIEW_GENERATION||WATCH_ID===null)return;
     if(!guide.enabled)return;
     WATCH_GUIDE=guide;
     $('#watchHelpTitle').textContent=guide.title||'Playback help';
@@ -282,15 +286,17 @@ function toggleWatchGuide(force){
   panel.classList.toggle('hidden',!opening);
   $('#watchHelpToggle').setAttribute('aria-expanded',String(opening));
 }
-function openWatch(videoId){
+function openWatch(videoId,externalWindow=null){
   const x=DATA.find(r=>String(r.id)===String(videoId));
   if(!x)return toast('Video not found in this library.','error');
   WATCH_ID=Number(x.id);WATCH_LAST_FOCUS=document.activeElement;
-  WATCH_GUIDE=null;toggleWatchGuide(false);loadWatchGuide();
+  WATCH_VIEW_GENERATION++;
+  PLAYBACK_REQUESTS.cancel();
+  WATCH_GUIDE=null;toggleWatchGuide(false);
   $('#watchTitle').textContent=x.video||x.topic||'Course video';
   $('#watchSubtitle').textContent=[x.lesson,x.topic].filter(Boolean).join(' · ')||'Course video';
   $('#watchId').textContent=`Video ID #${x.id}`;
-  setWatchError('');updateWatchSource(x);
+  setWatchError('Loading an authorized video link…');updateWatchSource(null);
   const configured=PLAYBACK_SETTINGS.siteOrigin;
   if(configured&&configured!==location.origin){
     setWatchError(`This site is running on ${location.origin}, but admin configured ${configured}. The browser sends its real origin, not the configured one. If playback fails, ask the admin to check the allowed CDN domains.`);
@@ -299,65 +305,74 @@ function openWatch(videoId){
   $('#watchOverlay').setAttribute('aria-hidden','false');
   document.body.classList.add('watch-open');
   $('#watchClose').focus();
+  refreshVideo(videoId,null,externalWindow);
+  loadWatchGuide();
 }
 function closeWatch(){
+  WATCH_VIEW_GENERATION++;
+  PLAYBACK_REQUESTS.cancel();PENDING_WATCH=null;
   const video=$('#watchVideo');video.pause();video.removeAttribute('src');video.load();
   $('#watchFrame').removeAttribute('src');
   $('#watchOverlay').classList.add('hidden');$('#watchOverlay').setAttribute('aria-hidden','true');
   document.body.classList.remove('watch-open');WATCH_ID=null;
   WATCH_LAST_FOCUS?.focus?.();
 }
-async function refreshVideo(videoId,button){
-  if(WATCH_REFRESHING)return;
-  WATCH_REFRESHING=true;
-  if(button)button.disabled=true;
-  $('#watchRefresh').disabled=true;
-  const original=button?.textContent;
-  if(button)button.textContent='Refreshing…';
-  $('#watchRefresh').textContent='Refreshing…';
-  setWatchError('');
+function privateHeaders(){return {'Content-Type':'application/json','X-CSRF-Token':SESSION?.csrfToken||''}}
+function setInfinityConnected(connected){
+  INFINITY_CONNECTED=connected;
+  $('#infinityState').textContent=connected?'Infinity connected':'Not connected';
+  $('#infinityConnect').textContent=connected?'Reconnect Infinity account':'Connect Infinity account';
+  $('#infinityDisconnect').classList.toggle('hidden',!connected);
+}
+function showInfinityDialog(reason=''){
+  if(typeof reason!=='string')reason='';
+  if($('#infinityDialog').open)return;
+  CONNECT_LAST_FOCUS=document.activeElement;
+  $('#infinityDialogTitle').textContent=(reason||INFINITY_CONNECTED)?'Reconnect Infinity account':'Connect Infinity account';
+  $('#infinityError').textContent=reason;$('#infinityLoading').textContent='';
+  $('#infinityDialog').showModal();$('#infinityEmail').focus();
+}
+function closeInfinityDialog(){
+  CONNECT_CONTROLLER?.abort();CONNECT_CONTROLLER=null;
+  $('#infinityPassword').value='';$('#infinityDialog').close();
+  CONNECT_LAST_FOCUS?.focus?.();
+}
+// Match the currently inspected provider algorithm, using only the REAL viewer browser.
+async function viewerVisitorId(){
+  let vendor=null,audio=null;
+  try{const canvas=document.createElement('canvas');const gl=canvas.getContext('webgl')||canvas.getContext('experimental-webgl');const ext=gl?.getExtension('WEBGL_debug_renderer_info');vendor=ext?gl.getParameter(ext.UNMASKED_VENDOR_WEBGL):null}catch{}
+  let context;
   try{
-    const response=await fetch('/api/videos/refresh',{
-      method:'POST',cache:'no-store',credentials:'same-origin',
-      headers:{'Content-Type':'application/json'},body:JSON.stringify({videoId:Number(videoId)}),
-    });
+    context=new(window.AudioContext||window.webkitAudioContext)();
+    const oscillator=context.createOscillator(),analyser=context.createAnalyser();
+    oscillator.connect(analyser);analyser.connect(context.destination);oscillator.start();
+    const data=new Float32Array(analyser.frequencyBinCount);analyser.getFloatFrequencyData(data);
+    oscillator.stop();audio=data.join(',');
+  }catch{}finally{await context?.close().catch(()=>{})}
+  const data={hardwareConcurrency:navigator.hardwareConcurrency||'unknown',deviceMemory:navigator.deviceMemory||'unknown',screenResolution:`${screen.width}x${screen.height}`,platform:navigator.platform,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,webglVendor:vendor,audioContextHash:audio,hasTouchSupport:'maxTouchPoints'in navigator?navigator.maxTouchPoints>0:false};
+  if(!crypto.subtle)throw new Error('A secure HTTPS connection is required to collect Infinity’s device information.');
+  const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(data)));
+  return [...new Uint8Array(hash)].map(x=>x.toString(16).padStart(2,'0')).join('');
+}
+async function refreshVideo(videoId,button,externalWindow=null){
+  if(WATCH_ID!==Number(videoId)){openWatch(videoId);externalWindow?.close();return}
+  const request=PLAYBACK_REQUESTS.begin();
+  $('#watchRefresh').disabled=true;$('#watchOpenExternal').disabled=true;
+  updateWatchSource(null);setWatchError('Loading an authorized video link…');
+  try{
+    if(!INFINITY_CONNECTED){PENDING_WATCH={id:Number(videoId),generation:request.generation};externalWindow?.close();setWatchError('Connect your Infinity account to watch this video.');showInfinityDialog();return}
+    const response=await PLAYBACK_REQUESTS.fetch(request,'/api/videos/playback',{method:'POST',cache:'no-store',credentials:'same-origin',headers:privateHeaders(),body:JSON.stringify({videoId:Number(videoId)})});
     const data=await response.json().catch(()=>({}));
-    if(response.status===401){location.href='/';return}
-    if(!response.ok)throw new Error(data.error||'Unable to refresh the video.');
-    const i=DATA.findIndex(x=>String(x.id)===String(videoId));
-    if(i>=0){
-      const old=DATA[i],updated={...old,...data.record};
-      updated._search=norm([updated.id,updated.topicId,updated.lessonId,updated.video,updated.topic,updated.lesson,updated.teacher,updated.subject,updated.subjectName,updated.teacherName,updated.section,updated.type,updated.description,updated.topicDescription].join(' '));
-      DATA[i]=updated;
-      const oldKey=lessonKey(old),newKey=lessonKey(updated);
-      if(LESSONS.has(oldKey))LESSONS.set(oldKey,LESSONS.get(oldKey).filter(x=>String(x.id)!==String(videoId)));
-      if(!LESSONS.has(newKey))LESSONS.set(newKey,[]);
-      LESSONS.get(newKey).push(updated);
-      if(WATCH_ID===Number(videoId)){
-        updateWatchSource(updated);
-        if(!safeExternalUrl(updated.download)&&!safeBunnyEmbed(updated.embedUrl))setWatchError('Metadata refreshed, but no playable link was returned. You may need to open the video through the provider.');
-      }
+    if(!PLAYBACK_REQUESTS.current(request)||WATCH_ID!==Number(videoId)){externalWindow?.close();return}
+    if(response.status===401&&data.code==='COURSE_AUTH_REQUIRED'){location.href='/';return}
+    if(['RECONNECT_REQUIRED','PROVIDER_DEVICE','PROVIDER_CHALLENGE'].includes(data.code)){
+      setInfinityConnected(false);$('#infinityState').textContent='Reconnect needed';PENDING_WATCH={id:Number(videoId),generation:request.generation};externalWindow?.close();showInfinityDialog(data.error);setWatchError(data.error);return;
     }
-    const version=await fetch('/api/courses/version',{cache:'no-store'}).then(r=>r.ok?r.json():null).catch(()=>null);
-    if(version?.version)DATA_VERSION=version.version;
-    const expanded=new Set($$('.v2-lesson[open]').map(el=>el.dataset.key));
-    render();
-    $$('.v2-lesson').forEach(el=>{if(expanded.has(el.dataset.key))el.open=true});
-    if(!data.linkReturned){
-      if(WATCH_ID===Number(videoId))setWatchError('The provider refreshed the metadata but did not return a new video link. Use its official player or ask the admin to check access.');
-      toast('Metadata updated, but no new video link was returned.','neutral');
-    }else if(!data.linkUpdated){
-      if(WATCH_ID===Number(videoId))setWatchError('The provider returned the same video link. If playback still fails, the CDN may reject this domain or the token may be invalid.');
-      toast('Provider returned the same link.','neutral');
-    }else toast('New video link saved. Try playing it again.');
-  }catch(err){
-    if(WATCH_ID===Number(videoId))setWatchError(err.message);
-    toast(err.message,'error');
-  }finally{
-    WATCH_REFRESHING=false;
-    if(button){button.disabled=false;button.textContent=original}
-    $('#watchRefresh').disabled=false;$('#watchRefresh').textContent='↻ Refresh video link';
-  }
+    if(!response.ok)throw new Error(data.error||'Unable to retrieve the video.');
+    updateWatchSource(data.kind==='embed'?{embedUrl:data.url}:{download:data.url});setWatchError('');
+    if(externalWindow){externalWindow.location.replace(data.url)}
+  }catch(err){externalWindow?.close();if(PLAYBACK_REQUESTS.current(request))setWatchError(err.message||'Unable to retrieve the video.')}
+  finally{if(PLAYBACK_REQUESTS.current(request)){$('#watchRefresh').disabled=false;$('#watchOpenExternal').disabled=false}}
 }
 
 function resourceRow(x,index,matchedIds){
@@ -370,7 +385,7 @@ function resourceRow(x,index,matchedIds){
     <div class="resource-copy"><strong>${esc(x.video||x.topic||'Untitled resource')}</strong><div><span>#${esc(x.id)}</span>${x.topic?`<span>${esc(x.topic)}</span>`:''}${x.type?`<span>${esc(x.type)}</span>`:''}${match?'<em>match</em>':''}</div></div>
     <div class="resource-buttons">
       ${video?`<button class="resource-action resource-watch" data-watch="${esc(x.id)}" type="button">${icon('video')}<span>Watch</span></button>`:''}
-      ${url?`<a class="resource-action" href="${esc(url)}" target="_blank" rel="noopener" referrerpolicy="${esc(playbackReferrerPolicy())}"><span>Open</span>${icon('external')}</a>`:!video?'<span class="resource-unavailable">No direct link</span>':''}
+      ${video?`<button class="resource-action" data-video-open="${esc(x.id)}" type="button"><span>Open</span>${icon('external')}</button>`:url?`<a class="resource-action" href="${esc(url)}" target="_blank" rel="noopener" referrerpolicy="${esc(playbackReferrerPolicy())}"><span>Open</span>${icon('external')}</a>`:'<span class="resource-unavailable">No direct link</span>'}
       ${video?`<button class="resource-retry" data-refresh="${esc(x.id)}" type="button" title="Request an updated video link">↻</button>`:''}
     </div>
   </article>`;
@@ -383,7 +398,7 @@ function groupBlock(group,index,autoOpen){
   const lessonName=x.lesson||`Lesson ${lessonId}`;
   const matchedIds=new Set(group.matched.map(r=>String(r.id)));
   const topics=unique(all,'topic');
-  const links=all.filter(r=>r.download).length;
+  const links=all.filter(r=>r.hasLink??Boolean(r.download)).length;
   const kinds={};all.forEach(r=>{const k=resourceKind(r);kinds[k]=(kinds[k]||0)+1});
   const grade=groupGrade(group);
   const g=GRADES[grade];
@@ -443,6 +458,7 @@ async function boot(){
     if([sessionRes,dataRes,labelsRes,versionRes].some(r=>r.status===401)){location.href='/';return}
     if([sessionRes,dataRes,labelsRes,versionRes].some(r=>!r.ok))throw new Error('Could not load the private library.');
     SESSION=await sessionRes.json();DATA=await dataRes.json();LABELS=await labelsRes.json();DATA_VERSION=(await versionRes.json()).version||null;
+    setInfinityConnected(Boolean(SESSION.infinityConnected));
     try{const settings=await fetch('/api/playback/settings',{cache:'no-store'});if(settings.ok)PLAYBACK_SETTINGS=await settings.json()}catch{}
     $('#siteReferrerPolicy').content=playbackReferrerPolicy();
     for(const x of DATA){
@@ -463,6 +479,8 @@ async function boot(){
 $('#results').addEventListener('click',e=>{
   const watch=e.target.closest('[data-watch]');
   if(watch){openWatch(watch.dataset.watch);return}
+  const external=e.target.closest('[data-video-open]');
+  if(external){openWatch(external.dataset.videoOpen,newPlaybackWindow());return}
   const refresh=e.target.closest('[data-refresh]');
   if(refresh){refreshVideo(refresh.dataset.refresh,refresh)}
 });
@@ -473,6 +491,47 @@ $('#watchHelpCopy').addEventListener('click',async()=>{
   catch{toast('Could not copy automatically. Select the code and copy it manually.','error')}
 });
 $('#watchClose').addEventListener('click',closeWatch);
+function newPlaybackWindow(){const popup=window.open('about:blank','_blank');if(popup)popup.opener=null;return popup}
+$('#watchOpenExternal').addEventListener('click',()=>{if(WATCH_ID!==null)refreshVideo(WATCH_ID,null,newPlaybackWindow())});
+$('#infinityConnect').addEventListener('click',showInfinityDialog);
+$('#infinityCancel').addEventListener('click',()=>{PENDING_WATCH=null;closeInfinityDialog()});
+$('#infinityDialog').addEventListener('cancel',e=>{e.preventDefault();if(!CONNECT_CONTROLLER){PENDING_WATCH=null;closeInfinityDialog()}});
+$('#infinityForm').addEventListener('submit',async e=>{
+  e.preventDefault();if(CONNECT_CONTROLLER)return;
+  const controller=new AbortController();CONNECT_CONTROLLER=controller;
+  let password=$('#infinityPassword').value;$('#infinityPassword').value='';
+  const email=$('#infinityEmail').value.trim();
+  for(const id of ['infinitySubmit','infinityCancel','infinityEmail','infinityPassword','infinityDisconnect'])$('#'+id).disabled=true;
+  $('#infinityError').textContent='';$('#infinityLoading').textContent='Connecting to Infinity…';
+  try{
+    const visitorId=await viewerVisitorId();
+    let payload=JSON.stringify({email,password,visitorId});password=null;
+    let response;
+    try{response=await fetch('/api/infinity/connect',{method:'POST',cache:'no-store',credentials:'same-origin',headers:privateHeaders(),signal:controller.signal,body:payload})}finally{payload=null}
+    const data=await response.json().catch(()=>({}));
+    if(controller!==CONNECT_CONTROLLER)return;
+    if(!response.ok)throw new Error(data.error||'Unable to connect to Infinity.');
+    setInfinityConnected(true);CONNECT_CONTROLLER=null;closeInfinityDialog();toast('Infinity account connected.');
+    const pending=PENDING_WATCH;PENDING_WATCH=null;
+    if(pending&&WATCH_ID===pending.id&&PLAYBACK_REQUESTS.generation===pending.generation)refreshVideo(pending.id);
+  }catch(error){if(controller===CONNECT_CONTROLLER){setInfinityConnected(false);$('#infinityError').textContent=error.message||'Connection failed.'}}
+  finally{
+    password=null;$('#infinityPassword').value='';
+    if(CONNECT_CONTROLLER===controller)CONNECT_CONTROLLER=null;
+    $('#infinityLoading').textContent='';
+    for(const id of ['infinitySubmit','infinityCancel','infinityEmail','infinityPassword','infinityDisconnect'])$('#'+id).disabled=false;
+  }
+});
+$('#infinityDisconnect').addEventListener('click',async()=>{
+  PLAYBACK_REQUESTS.cancel();PENDING_WATCH=null;updateWatchSource(null);
+  $('#infinityDisconnect').disabled=true;$('#infinityConnect').disabled=true;
+  try{
+    const response=await fetch('/api/infinity/disconnect',{method:'POST',cache:'no-store',headers:privateHeaders()});
+    if(!response.ok)throw new Error('Unable to disconnect. Please try again.');
+    setInfinityConnected(false);if(WATCH_ID!==null)setWatchError('Infinity disconnected. Reconnect to watch.');toast('Infinity account disconnected.');
+  }catch(error){toast(error.message,'error')}
+  finally{$('#infinityDisconnect').disabled=false;$('#infinityConnect').disabled=false;$('#watchRefresh').disabled=false}
+});
 $('#watchOverlay').addEventListener('click',e=>{if(e.target===$('#watchOverlay'))closeWatch()});
 $('#watchRefresh').addEventListener('click',()=>{if(WATCH_ID!==null)refreshVideo(WATCH_ID,$('#watchRefresh'))});
 $('#watchVideo').addEventListener('error',()=>{
@@ -495,10 +554,20 @@ $('#changeGradeBtn').onclick=()=>{openGradeGate();$('#profileMenu').classList.ad
 $('#browseAllMenuBtn').onclick=()=>{setGrade('all',false);$('#profileMenu').classList.add('hidden')};
 $('#profileBtn').onclick=e=>{e.stopPropagation();const m=$('#profileMenu');m.classList.toggle('hidden');$('#profileBtn').setAttribute('aria-expanded',String(!m.classList.contains('hidden')))};
 document.addEventListener('click',e=>{if(!e.target.closest('.v2-top-actions'))$('#profileMenu').classList.add('hidden')});
-$('#logoutBtn').onclick=async()=>{await fetch('/api/logout',{method:'POST'});location.href='/'};
+$('#logoutBtn').onclick=async()=>{
+  PLAYBACK_REQUESTS.cancel();PENDING_WATCH=null;updateWatchSource(null);
+  const response=await fetch(SESSION?.role==='admin'?'/api/admin/logout':'/api/logout',{method:'POST',headers:privateHeaders()});
+  if(response.ok)location.href='/';else toast('Logout failed. Please try again.','error');
+};
 document.addEventListener('keydown',e=>{
   if($('#watchOverlay').classList.contains('hidden')&&(e.key==='/'||(e.ctrlKey&&e.key.toLowerCase()==='k'))&&!['INPUT','SELECT','TEXTAREA'].includes(document.activeElement?.tagName)){e.preventDefault();$('#q').focus()}
+  if($('#infinityDialog').open)return;
   if(e.key==='Escape'&&!$('#watchOverlay').classList.contains('hidden')){closeWatch();return}
+  if(e.key==='Tab'&&!$('#watchOverlay').classList.contains('hidden')){
+    const focusable=[...$('#watchOverlay').querySelectorAll('button,a[href],video,iframe,[tabindex="0"]')].filter(el=>!el.disabled&&!el.closest('.hidden'));
+    const first=focusable[0],last=focusable[focusable.length-1];
+    if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus()}
+  }
   if(e.key==='Escape'&&$('#gradeGate').classList.contains('open')&&localStorage.getItem(GRADE_KEY))closeGradeGate();
 });
 setInterval(async()=>{

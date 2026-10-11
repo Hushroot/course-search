@@ -10,7 +10,8 @@ if(fs.existsSync(envPath)&&!process.argv.includes('--force')){
 }
 const admin=`Admin-${crypto.randomBytes(14).toString('base64url')}`;
 const secret=crypto.randomBytes(48).toString('base64url');
-const text=`PORT=3000\nADMIN_PASSWORD=${admin}\nSESSION_SECRET=${secret}\nCOOKIE_SECURE=false\n`;
+const key=crypto.randomBytes(32).toString('base64');
+const text=`PORT=3000\nADMIN_PASSWORD=${admin}\nSESSION_SECRET=${secret}\nINFINITY_AUTH_KEY=${key}\nCOOKIE_SECURE=false\n`;
 fs.writeFileSync(envPath,text,{mode:0o600});
 console.log('Created .env');
 console.log(`Admin password: ${admin}`);

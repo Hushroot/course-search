@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Course Search — Admin</title>
-<link rel="stylesheet" href="/assets/site.css?v=1.9">
+<link rel="stylesheet" href="/assets/site.css?v=1.10.1">
 </head>
 <body>
 <section class="admin-login" id="adminLogin">
@@ -50,13 +50,13 @@
 
   <section class="panel infinity-panel">
     <div class="panel-title-row">
-      <div><h2>Fetch videos from Infinity</h2><div class="panel-sub">Paste your Infinity cookie once, then add or refresh any course item by Video ID. The server fetches the lesson/topic metadata and saves it to persistent storage automatically.</div></div>
+      <div><h2>Fetch catalog metadata from Infinity</h2><div class="panel-sub">This admin connection is only for catalog fetching and scanning. Viewers must connect their own Infinity accounts; this cookie is never used for viewer playback.</div></div>
       <span class="infinity-status" id="infinityStatus">Checking…</span>
     </div>
     <div class="infinity-grid">
       <form id="cookieForm" class="infinity-box">
         <div class="field"><label for="infinityCookie">Infinity Cookie header</label><input class="input" id="infinityCookie" type="password" autocomplete="off" spellcheck="false" placeholder="cf_clearance=...; XSRF-TOKEN=...; jessor_session=..."></div>
-        <div class="infinity-help">Stored only in the server's persistent volume. The current cookie is never shown back in the browser.</div>
+        <div class="infinity-help">Encrypted on the private server volume with the configured authentication key. The saved cookie is never shown back in the browser.</div>
         <button class="btn small" id="saveCookieBtn" type="submit">Save / replace cookie</button>
         <div class="error" id="cookieError"></div><div class="label-status" id="cookieSaved"></div>
       </form>
@@ -146,6 +146,6 @@
     <div class="error" id="tableError"></div>
   </section>
 </main>
-<script src="/assets/admin.js?v=1.9" defer></script>
+<script src="/assets/admin.js?v=1.10.1" defer></script>
 </body>
 </html>

@@ -188,3 +188,19 @@ body.watch-open{overflow:hidden}
 .guide-admin-toggle small{color:#9ca9b9;font-size:12px}
 .guide-admin-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 @media(max-width:740px){.watch-help-section{margin:8px 17px 0}.watch-help-panel{padding:15px}.watch-help-heading{align-items:flex-start}.watch-help-colab{width:100%;text-align:center}.guide-admin-actions .btn{flex:1}}
+.infinity-actions{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;font-size:.75rem}
+.watch-dialog{max-height:calc(100dvh - 40px);overflow-y:auto}
+@media(max-width:740px){.watch-dialog{max-height:100dvh;min-height:0}}
+.infinity-actions #infinityState{color:#a9bac9}
+.infinity-dialog{background:#101d2a;color:#eaf3fa;border:1px solid #33485c;border-radius:18px;padding:1.5rem;width:min(460px,calc(100vw - 2rem));max-height:90vh;overflow:auto}
+.infinity-dialog::backdrop{background:rgba(0,0,0,.75)}
+.infinity-dialog h2{margin:0 0 1rem;font-size:1.3rem}
+.infinity-dialog p{font-size:.9rem;line-height:1.6}
+.infinity-dialog label{display:block;margin:.8rem 0 .3rem}
+.infinity-dialog input{width:100%;box-sizing:border-box;padding:.75rem;border-radius:8px;border:1px solid #496078;background:#071018;color:#fff}
+.infinity-dialog-buttons{display:flex;justify-content:flex-end;gap:.75rem;margin-top:1rem}
+.infinity-dialog button{padding:.7rem 1rem;border-radius:8px;background:#1e4055;color:#fff;border:1px solid #496078;cursor:pointer}
+.infinity-dialog button:disabled{opacity:.5;cursor:wait}
+#infinityError{color:#ffb8b8}
+.infinity-dialog :focus-visible,.infinity-actions :focus-visible{outline:2px solid #5ee6ff;outline-offset:3px}
+@media(max-width:760px){.v2-top-actions{grid-column:1/-1;grid-row:2;justify-self:stretch;justify-content:flex-end;flex-wrap:wrap;min-width:0}.grade-tabs{grid-row:3}.infinity-actions{flex:1;justify-content:flex-start;min-width:0}.infinity-actions .text-button{font-size:.75rem}}

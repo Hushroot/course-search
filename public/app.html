@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#071018">
 <meta name="referrer" content="origin" id="siteReferrerPolicy">
 <title>Course Search</title>
-<link rel="stylesheet" href="/assets/site.css?v=1.9">
+<link rel="stylesheet" href="/assets/site.css?v=1.10.1">
 </head>
 <body class="student-app-v2" data-grade="g10">
 <div class="student-bg" aria-hidden="true"><span></span><span></span><span></span></div>
@@ -34,6 +34,7 @@
     </nav>
 
     <div class="v2-top-actions">
+      <div class="infinity-actions"><button class="text-button" id="infinityConnect" type="button">Connect Infinity account</button><span id="infinityState" role="status">Not connected</span><button class="text-button hidden" id="infinityDisconnect" type="button">Disconnect</button></div>
       <div class="live-pill"><span></span>Auto-synced</div>
       <a class="v2-icon-btn hidden" id="adminLink" href="/admin" title="Admin panel" aria-label="Admin panel">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.6v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3V9.6h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.08.37.3.72.6 1 .3.27.7.4 1.1.4H21v4h-.09c-.4 0-.8.13-1.1.4-.3.28-.52.63-.6 1Z"/></svg>
@@ -114,7 +115,7 @@
     <div class="watch-error hidden" id="watchError" role="status"></div>
     <div class="watch-controls">
       <span id="watchId">Video ID —</span>
-      <div class="watch-buttons"><button class="watch-refresh" id="watchRefresh" type="button">↻ Refresh video link</button><a id="watchOpenExternal" class="watch-external hidden" target="_blank" rel="noopener" referrerpolicy="origin">Open source ↗</a></div>
+      <div class="watch-buttons"><button class="watch-refresh" id="watchRefresh" type="button">↻ Refresh video link</button><button id="watchOpenExternal" class="watch-external hidden" type="button">Open source ↗</button></div>
     </div>
     <div class="watch-help-section" id="watchHelpSection">
       <button class="watch-help-toggle" id="watchHelpToggle" type="button" aria-controls="watchHelpPanel" aria-expanded="false"><span>📖 Playback help &amp; Colab guide</span><span class="watch-help-chevron">⌄</span></button>
@@ -130,6 +131,17 @@
   </div>
 </div>
 <div class="toast-stack" id="toastStack" aria-live="polite"></div>
-<script src="/assets/app.js?v=1.9" defer></script>
+<dialog id="infinityDialog" class="infinity-dialog" aria-labelledby="infinityDialogTitle" aria-describedby="infinityExplanation">
+  <form id="infinityForm">
+    <h2 id="infinityDialogTitle">Connect Infinity account</h2>
+    <p id="infinityExplanation">Use your own Infinity School account. Credentials are sent securely through this server to Infinity; passwords are not saved. This connection uses device information from your actual browser, as Infinity’s login form does. Verification and device restrictions cannot be bypassed.</p>
+    <label for="infinityEmail">Infinity email</label><input id="infinityEmail" name="email" type="email" autocomplete="username" maxlength="254" required>
+    <label for="infinityPassword">Password</label><input id="infinityPassword" name="password" type="password" autocomplete="current-password" maxlength="1024" required>
+    <p id="infinityError" role="alert"></p><p id="infinityLoading" role="status"></p>
+    <div class="infinity-dialog-buttons"><button id="infinityCancel" type="button">Cancel</button><button id="infinitySubmit" type="submit">Connect</button></div>
+  </form>
+</dialog>
+<script src="/assets/playback-state.js?v=1.10.1" defer></script>
+<script src="/assets/app.js?v=1.10.1" defer></script>
 </body>
 </html>
