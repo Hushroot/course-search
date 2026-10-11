@@ -5,3 +5,7 @@ data/access-codes.json.tmp
 data/infinity-auth.json
 data/scan-state.json
 data/*.tmp
+data/private-auth/
+data/infinity-auth.json.migration
+node_modules/
+*.zip

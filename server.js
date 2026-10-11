@@ -4,6 +4,8 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { AuthStore } = require('./lib/auth-store');
+const infinityViewer = require('./lib/infinity');
 
 const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, 'public');
@@ -126,6 +128,102 @@ if (SESSION_SECRET.length < 32 || SESSION_SECRET.startsWith('replace-with-')) {
   process.exit(1);
 }
 
+let authStore;
+try {
+  authStore = new AuthStore(path.join(STATE_DIR, 'private-auth'), process.env.INFINITY_AUTH_KEY);
+  // Verify the replacement before atomically replacing any legacy plaintext file.
+  if (fs.existsSync(INFINITY_AUTH_FILE)) {
+    const legacy = JSON.parse(fs.readFileSync(INFINITY_AUTH_FILE, 'utf8'));
+    if (legacy.migrated === true) {
+      if (!authStore.read('admin')) throw new Error('Migrated admin authentication is missing.');
+    } else {
+      if (typeof legacy.cookie !== 'string') throw new Error('Legacy Infinity authentication format is invalid; migration stopped.');
+      const previous = authStore.read('admin');
+      if (previous && previous.cookie !== legacy.cookie) throw new Error('Conflicting admin authentication; migration stopped.');
+      authStore.write('admin', { cookie: legacy.cookie, updatedAt: legacy.updatedAt || nowIso() });
+      if (authStore.read('admin').cookie !== legacy.cookie) throw new Error('Authentication migration verification failed.');
+      const replacement = `${INFINITY_AUTH_FILE}.migration`;
+      fs.writeFileSync(replacement, JSON.stringify({ migrated: true, storage: 'private-auth/admin.json' }), { mode: 0o600 });
+      fs.renameSync(replacement, INFINITY_AUTH_FILE);
+    }
+  }
+} catch (error) {
+  // No cookie, token, response body or original exception is logged.
+  console.error('Infinity authentication storage unavailable. Check INFINITY_AUTH_KEY and any legacy authentication file. Migration leaves the original intact on failure.');
+  process.exit(1);
+}
+authStore.cleanup();
+setInterval(() => authStore.cleanup(), 5 * 60 * 1000).unref();
+const VIEWER_CONNECTION_MS = 12 * 60 * 60 * 1000;
+const viewerBusy = new Set();
+const viewerOperations = new Map();
+const playbackHosts = new Set(['infinityschool.net']);
+// These are explicit known library CDN hosts, not a wildcard accepting arbitrary tenants.
+for (const host of readJsonFile(path.join(DATA_DIR, 'playback-hosts.json'), [])) {
+  if (typeof host === 'string' && /^vz-[a-f0-9]+-[a-f0-9]+\.b-cdn\.net$/.test(host)) playbackHosts.add(host);
+}
+for (const host of String(process.env.INFINITY_PLAYBACK_HOSTS || '').split(',')) {
+  if (host.trim() && /^[a-z0-9.-]+$/.test(host.trim()) && !host.includes('*')) playbackHosts.add(host.trim());
+}
+function createViewer(exp) {
+  const sid = crypto.randomBytes(32).toString('hex');
+  authStore.write(sid, { exp, generation: 0, closed: false });
+  return sid;
+}
+function viewerRecord(token) {
+  if (!token || !/^[a-f0-9]{64}$/.test(token.sid || '')) return null;
+  if (token.role === 'user' && !codeSessionValid(readCodes().find(code => code.id === token.codeId))) return null;
+  const record = authStore.read(token.sid);
+  return record && !record.closed && record.exp > Date.now() ? record : null;
+}
+function invalidateViewer(token, closed = false) {
+  if (!token?.sid) return;
+  viewerOperations.get(token.sid)?.abort();
+  const record = authStore.read(token.sid);
+  if (record) authStore.write(token.sid, { exp: record.exp, generation: record.generation + 1, closed: closed || record.closed });
+}
+function viewerConnected(record) { return Boolean(record?.jar && record.connectedUntil > Date.now()); }
+function requireViewer(req) {
+  const access = anyAccess(req);
+  if (!access || !viewerRecord(access.token)) throw infinityViewer.failure('COURSE_AUTH_REQUIRED', 'Course Search login required.', 401);
+  return access.token;
+}
+function viewerCsrf(req, token) {
+  const expectedOrigin = process.env.APP_ORIGIN || `${COOKIE_SECURE ? 'https' : 'http'}://${req.headers.host}`;
+  if (req.headers.origin && req.headers.origin !== expectedOrigin) return false;
+  if (['cross-site', 'same-site'].includes(req.headers['sec-fetch-site'])) return false;
+  return safeEqual(req.headers['x-csrf-token'] || '', hmac(token.sid, 'viewer-csrf'));
+}
+function limitViewer(req, token, bucket, max, windowMs) {
+  for (const scope of [clientIp(req), token.sid]) {
+    const key = `${bucket}:${scope}`;
+    const now = Date.now();
+    let item = attempts.get(key);
+    if (!item || now - item.start >= windowMs) item = { start: now, count: 0 };
+    item.count++; attempts.set(key, item);
+    if (item.count > max) throw Object.assign(infinityViewer.failure('RATE_LIMIT', 'Too many requests. Please wait and try again.', 429), { retryAfter: Math.max(1, Math.ceil((windowMs - (now - item.start)) / 1000)) });
+  }
+}
+async function viewerOperation(token, operation) {
+  const sid = token.sid;
+  if (viewerBusy.has(sid)) throw Object.assign(infinityViewer.failure('REQUEST_BUSY', 'An Infinity request is already running. Please wait.', 429), { retryAfter: 1 });
+  const before = viewerRecord(token);
+  if (!before) throw infinityViewer.failure('COURSE_AUTH_REQUIRED', 'Course Search login required.', 401);
+  const controller = new AbortController();
+  viewerBusy.add(sid); viewerOperations.set(sid, controller);
+  const current = () => {
+    const record = viewerRecord(token);
+    if (!record || record.generation !== before.generation || controller.signal.aborted) throw infinityViewer.failure('CONNECTION_CHANGED', 'Connection changed. Please try again.', 409);
+    return record;
+  };
+  try { return await operation(before, controller.signal, current); }
+  catch (error) {
+    if (controller.signal.aborted && !['CONNECTION_CHANGED','RECONNECT_REQUIRED','PROVIDER_DEVICE','PROVIDER_CHALLENGE'].includes(error.code)) throw infinityViewer.failure('CONNECTION_CHANGED', 'Connection changed. Please try again.', 409);
+    throw error;
+  }
+  finally { viewerBusy.delete(sid); if (viewerOperations.get(sid) === controller) viewerOperations.delete(sid); }
+}
+
 
 // Browser-controlled referrers cannot be spoofed by a setting. The configured
 // origin is a deployment diagnostic; playback uses the real page origin.
@@ -210,46 +308,6 @@ function savePlaybackSettings(body) {
   atomicWriteJson(PLAYBACK_SETTINGS_FILE, settings, 0o600);
   return settings;
 }
-
-// A user may only refresh an existing resource, never enumerate arbitrary IDs.
-// Requests are limited per session/IP and per ID to protect the upstream.
-const videoRefreshCooldown = new Map();
-const videoRefreshPending = new Map();
-const REFRESH_COOLDOWN_MS = 90 * 1000;
-async function refreshExistingVideo(videoId) {
-  const id = Number(videoId);
-  if (!Number.isSafeInteger(id) || id < 1) throw Object.assign(new Error('Invalid video ID.'), { status: 400 });
-  const courses = readJsonFile(COURSES_FILE, []);
-  if (!Array.isArray(courses) || !courses.some(x => x && Number(x.id) === id)) {
-    throw Object.assign(new Error('This video is not in the course library.'), { status: 404 });
-  }
-  if (videoRefreshPending.has(id)) return videoRefreshPending.get(id);
-  const last = videoRefreshCooldown.get(id) || 0;
-  const wait = REFRESH_COOLDOWN_MS - (Date.now() - last);
-  if (wait > 0) throw Object.assign(new Error(`Recently refreshed. Try again in ${Math.ceil(wait / 1000)} seconds.`), { status: 429 });
-  videoRefreshCooldown.set(id, Date.now());
-  const promise = (async () => {
-    const previous = courses.find(x => x && Number(x.id) === id);
-    const fresh = await fetchVideoForScan(id);
-    if (fresh.kind !== 'hit') throw Object.assign(new Error('The provider returned no usable data for this Video ID.'), { status: 404 });
-    upsertCourseRecords([fresh.record]);
-    const updated = readJsonFile(COURSES_FILE, []).find(x => x && Number(x.id) === id);
-    const newLink = fresh.record.download || null;
-    return {
-      ok: true, action: 'updated', record: updated,
-      linkUpdated: Boolean((newLink && newLink !== previous.download) || (updated.embedUrl && updated.embedUrl !== previous.embedUrl)),
-      linkReturned: Boolean(newLink || updated.embedUrl),
-    };
-  })();
-  videoRefreshPending.set(id, promise);
-  try { return await promise; }
-  catch (err) { videoRefreshCooldown.delete(id); throw err; }
-  finally { videoRefreshPending.delete(id); }
-}
-setInterval(() => {
-  const cutoff = Date.now() - REFRESH_COOLDOWN_MS;
-  for (const [id, time] of videoRefreshCooldown) if (time < cutoff) videoRefreshCooldown.delete(id);
-}, 5 * 60 * 1000).unref();
 
 function nowIso() { return new Date().toISOString(); }
 function b64url(input) { return Buffer.from(input).toString('base64url'); }
@@ -382,13 +440,14 @@ function parseCookies(req) {
 function userSession(req) {
   const token = verifySession(parseCookies(req).cs_session);
   if (!token || token.role !== 'user' || !token.codeId) return null;
+  if (!viewerRecord(token)) return null;
   const code = readCodes().find(c => c.id === token.codeId);
   if (!codeSessionValid(code)) return null;
   return { token, code };
 }
 function adminSession(req) {
   const token = verifySession(parseCookies(req).cs_admin);
-  return token && token.role === 'admin' ? token : null;
+  return token && token.role === 'admin' && viewerRecord(token) ? token : null;
 }
 function anyAccess(req) {
   const admin = adminSession(req);
@@ -448,7 +507,9 @@ function readJsonBody(req, limit = 32 * 1024) {
     });
     req.on('end', () => {
       try {
-        resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {});
+        const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {};
+        if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error();
+        resolve(body);
       } catch {
         reject(Object.assign(new Error('Invalid JSON'), { status: 400 }));
       }
@@ -461,11 +522,12 @@ function sameOrigin(req) {
   if (!origin) return true;
   try {
     const u = new URL(origin);
-    return u.host === req.headers.host;
+    return u.origin === (process.env.APP_ORIGIN || `${COOKIE_SECURE ? 'https' : 'http'}://${req.headers.host}`);
   } catch { return false; }
 }
 function clientIp(req) {
-  return String(req.headers['cf-connecting-ip'] || req.headers['x-real-ip'] || String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || 'unknown');
+  if (process.env.TRUST_PROXY !== 'true') return String(req.socket.remoteAddress || 'unknown');
+  return String(req.headers['cf-connecting-ip'] || req.headers['x-real-ip'] || String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || 'unknown').slice(0, 100);
 }
 
 const attempts = new Map();
@@ -509,7 +571,7 @@ const DENIAL_MARKERS = [
 ];
 
 function readInfinityAuth() {
-  const saved = readJsonFile(INFINITY_AUTH_FILE, {});
+  const saved = authStore.read('admin') || {};
   return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
 }
 function infinityCookie() {
@@ -527,8 +589,8 @@ function infinityAuthStatus() {
 function saveInfinityCookie(value) {
   const cookieValue = String(value || '').trim();
   if (!cookieValue) throw Object.assign(new Error('Paste the full Infinity School Cookie header.'), { status: 400 });
-  if (cookieValue.length > 16 * 1024) throw Object.assign(new Error('Cookie header is too large.'), { status: 400 });
-  atomicWriteJson(INFINITY_AUTH_FILE, { cookie: cookieValue, updatedAt: nowIso() }, 0o600);
+  if (cookieValue.length > 16 * 1024 || /[\r\n\x00]/.test(cookieValue)) throw Object.assign(new Error('Cookie header is too large or has invalid characters.'), { status: 400 });
+  authStore.write('admin', { cookie: cookieValue, updatedAt: nowIso() });
 }
 function safeDict(obj, key) {
   const value = obj && typeof obj === 'object' && !Array.isArray(obj) ? obj[key] : null;
@@ -598,7 +660,7 @@ async function infinityRequest(url) {
       }
     }
   }
-  throw Object.assign(new Error(`Infinity request failed: ${lastError ? lastError.message : 'unknown error'}`), { status: 502 });
+  throw Object.assign(new Error('Infinity catalog request failed. Check provider availability and admin authentication.'), { status: 502 });
 }
 function parseInfinityRecord(videoId, fileResponse, videoResponse) {
   const fileJson = fileResponse.json;
@@ -900,7 +962,7 @@ async function runVideoScan(trigger = 'scheduled') {
           hits += 1;
           lastHitId = videoId;
           hitsToSave.push(result.value.record);
-          console.log(`[auto-scan] hit ${videoId} | ${result.value.record.video || 'resource found'}`);
+          console.log(`[auto-scan] hit ${videoId}`);
         } else {
           missStreak += 1;
           if (missStreak === 1 || missStreak % 100 === 0 || missStreak === AUTO_SCAN_MAX_MISSES) {
@@ -943,7 +1005,7 @@ async function runVideoScan(trigger = 'scheduled') {
     return finalState;
   } catch (error) {
     const failedAt = nowIso();
-    console.error('[auto-scan] failed:', error);
+    console.error('[auto-scan] failed', error.code || 'SCAN_FAILED', error.status || 500);
     return writeScanState({
       running: false,
       trigger,
@@ -964,7 +1026,7 @@ async function runVideoScan(trigger = 'scheduled') {
 }
 function startVideoScan(trigger = 'manual') {
   if (scanRuntime.running) return false;
-  scanRuntime.promise = runVideoScan(trigger).catch(error => console.error('[auto-scan] unhandled:', error));
+  scanRuntime.promise = runVideoScan(trigger).catch(error => console.error('[auto-scan] unhandled', error.code || 'SCAN_FAILED'));
   return true;
 }
 function checkScheduledScan() {
@@ -986,10 +1048,12 @@ async function handler(req, res) {
   const pathname = url.pathname;
 
   try {
+    if (['POST','PUT','PATCH','DELETE'].includes(req.method) && (!sameOrigin(req) || req.headers['sec-fetch-site'] === 'cross-site')) return json(res, 403, { error: 'Cross-site request blocked.' });
     if (req.method === 'GET' && pathname === '/health') return json(res, 200, { ok: true });
 
     if (req.method === 'GET' && pathname === '/assets/site.css') return sendFile(res, routes.css, 'text/css; charset=utf-8', 'no-store');
     if (req.method === 'GET' && pathname === '/assets/app.js') return sendFile(res, routes.appJs, 'text/javascript; charset=utf-8', 'no-store');
+    if (req.method === 'GET' && pathname === '/assets/playback-state.js') return sendFile(res, path.join(PUBLIC, 'assets/playback-state.js'), 'text/javascript; charset=utf-8', 'no-store');
     if (req.method === 'GET' && pathname === '/assets/login.js') return sendFile(res, routes.loginJs, 'text/javascript; charset=utf-8', 'no-store');
     if (req.method === 'GET' && pathname === '/assets/admin.js') return sendFile(res, routes.adminJs, 'text/javascript; charset=utf-8', 'no-store');
 
@@ -1012,11 +1076,18 @@ async function handler(req, res) {
       code.lastUsedAt = nowIso();
       writeCodes(codes);
       clearLimit(req, 'access-login');
-      const token = signSession({ role: 'user', codeId: code.id, iat: Date.now(), exp: Date.now() + 7 * 24 * 60 * 60 * 1000 });
+      const exp = Date.now() + 7 * 24 * 60 * 60 * 1000;
+      const previous = userSession(req);
+      if (previous) invalidateViewer(previous.token, true);
+      const token = signSession({ role: 'user', codeId: code.id, sid: createViewer(exp), iat: Date.now(), exp });
       return json(res, 200, { ok: true }, { 'Set-Cookie': cookie('cs_session', token, { maxAge: 7 * 24 * 60 * 60 }) });
     }
 
     if (req.method === 'POST' && pathname === '/api/logout') {
+      const token = userSession(req)?.token;
+      if (!token) throw infinityViewer.failure('COURSE_AUTH_REQUIRED', 'Course Search login required.', 401);
+      if (!viewerCsrf(req, token)) return json(res, 403, { error: 'Cross-site request blocked.' });
+      invalidateViewer(token, true);
       return json(res, 200, { ok: true }, { 'Set-Cookie': cookie('cs_session', '', { maxAge: 0 }) });
     }
 
@@ -1028,13 +1099,26 @@ async function handler(req, res) {
     if (req.method === 'GET' && pathname === '/api/session') {
       const access = anyAccess(req);
       if (!access) return json(res, 401, { authenticated: false });
-      if (access.role === 'admin') return json(res, 200, { authenticated: true, role: 'admin', label: 'Administrator' });
-      return json(res, 200, { authenticated: true, role: 'user', label: access.code.label || `Code ••••${access.code.hint || ''}` });
+      return json(res, 200, { authenticated: true, role: access.role,
+        label: access.role === 'admin' ? 'Administrator' : (access.code.label || `Code ••••${access.code.hint || ''}`),
+        csrfToken: hmac(access.token.sid, 'viewer-csrf'), infinityConnected: viewerConnected(viewerRecord(access.token)) });
     }
 
     if (req.method === 'GET' && pathname === '/api/courses') {
-      if (!anyAccess(req)) return json(res, 401, { error: 'Authentication required.' });
-      return sendFile(res, COURSES_FILE, 'application/json; charset=utf-8');
+      const access = anyAccess(req);
+      if (!access) return json(res, 401, { error: 'Authentication required.' });
+      if (access.role === 'admin') return sendFile(res, COURSES_FILE, 'application/json; charset=utf-8');
+      const metadataFields = ['id','topicId','lessonId','video','topic','lesson','teacher','subject','section','type','description','topicDescription','duration','free','price','thumb','lessonThumb'];
+      return json(res, 200, readJsonFile(COURSES_FILE, []).map(row => {
+        const url = String(row.download || row.path || '').split('?')[0];
+        const isVideo = Boolean(row.isVideo || row.embedUrl) || /video|youtube|session|lecture|vid/i.test(String(row.type || '')) || /\.(mp4|webm|m3u8|mov|m4v)$/i.test(url) || /^https:\/\/vz-[a-f0-9]+-[a-f0-9]+\.b-cdn\.net\//i.test(url);
+        const clean = Object.fromEntries(metadataFields.filter(key => row[key] !== undefined).map(key => [key, row[key]]));
+        clean.isVideo = isVideo;
+        clean.hasLink = Boolean(row.hasLink || row.download || row.embedUrl);
+        // Non-video resources retain their existing public/provider navigation links.
+        if (!isVideo) clean.download = row.download;
+        return clean;
+      }));
     }
 
 
@@ -1060,13 +1144,58 @@ async function handler(req, res) {
       return json(res, 200, { ...settings, actualOrigin: null });
     }
 
-    if (req.method === 'POST' && pathname === '/api/videos/refresh') {
-      if (!anyAccess(req)) return json(res, 401, { error: 'Authentication required.' });
-      if (!sameOrigin(req)) return json(res, 403, { error: 'Cross-site request blocked.' });
-      const rl = rateLimit(req, 'student-video-refresh', 8, 60 * 1000);
-      if (rl.blocked) return json(res, 429, { error: 'Too many refresh attempts. Try again in a minute.' }, { 'Retry-After': rl.retryAfter });
+    if (pathname === '/api/infinity/status' && req.method === 'GET') {
+      const token = requireViewer(req);
+      return json(res, 200, { connected: viewerConnected(viewerRecord(token)) });
+    }
+    if (pathname === '/api/infinity/disconnect' && req.method === 'POST') {
+      const token = requireViewer(req);
+      if (!viewerCsrf(req, token)) return json(res, 403, { error: 'Cross-site request blocked.' });
+      invalidateViewer(token);
+      return json(res, 200, { connected: false });
+    }
+    if (pathname === '/api/infinity/connect' && req.method === 'POST') {
+      const token = requireViewer(req);
+      if (!viewerCsrf(req, token)) return json(res, 403, { error: 'Cross-site request blocked.' });
+      limitViewer(req, token, 'infinity-login', 5, 10 * 60 * 1000);
+      let body = await readJsonBody(req, 8 * 1024);
+      if (typeof body.email !== 'string' || body.email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email) || typeof body.password !== 'string' || !body.password || body.password.length > 1024 || !/^[a-f0-9]{64}$/.test(body.visitorId || '')) {
+        body.password = null;
+        throw infinityViewer.failure('INVALID_INPUT', 'Enter your Infinity email and password. Browser device information must be available.', 400);
+      }
+      try {
+        await viewerOperation(token, async (record, signal, current) => {
+          // An explicit reconnect replaces, rather than silently retaining, an old account.
+          const disconnected = { exp: record.exp, generation: record.generation, closed: false };
+          authStore.write(token.sid, disconnected);
+          const jar = await infinityViewer.login(body.email, body.password, body.visitorId, signal);
+          current();
+          authStore.write(token.sid, { ...disconnected, generation: record.generation + 1, jar, connectedUntil: Math.min(record.exp, Date.now() + VIEWER_CONNECTION_MS) });
+        });
+      } finally { body.password = null; body = null; }
+      return json(res, 200, { connected: true });
+    }
+    if (req.method === 'POST' && ['/api/videos/refresh', '/api/videos/playback'].includes(pathname)) {
+      const token = requireViewer(req);
+      if (!viewerCsrf(req, token)) return json(res, 403, { error: 'Cross-site request blocked.' });
+      limitViewer(req, token, 'viewer-playback', 30, 60 * 1000);
       const body = await readJsonBody(req);
-      const result = await refreshExistingVideo(body.videoId);
+      const row = getVideoForAdmin(body.videoId); // Existence check only; never reads its saved source.
+      const result = await viewerOperation(token, async (record, signal, current) => {
+        if (!viewerConnected(record)) {
+          invalidateViewer(token);
+          throw infinityViewer.failure('RECONNECT_REQUIRED', 'Connect your Infinity account to watch this video.', 409);
+        }
+        try {
+          const fresh = await infinityViewer.playback(record.jar, Number(row.id), playbackHosts, signal);
+          current();
+          authStore.write(token.sid, { ...record, jar: fresh.cookies });
+          return { videoId: Number(row.id), ...fresh.source };
+        } catch (error) {
+          if (['RECONNECT_REQUIRED','PROVIDER_DEVICE','PROVIDER_CHALLENGE'].includes(error.code)) { current(); invalidateViewer(token); }
+          throw error;
+        }
+      });
       return json(res, 200, result);
     }
 
@@ -1090,11 +1219,17 @@ async function handler(req, res) {
       const enteredDigest = adminDigest(body.password || '');
       if (!safeEqual(enteredDigest, EXPECTED_ADMIN_DIGEST)) return json(res, 401, { error: 'Wrong admin password.' });
       clearLimit(req, 'admin-login');
-      const token = signSession({ role: 'admin', iat: Date.now(), exp: Date.now() + 8 * 60 * 60 * 1000 });
+      const exp = Date.now() + 8 * 60 * 60 * 1000;
+      const previous = adminSession(req);
+      if (previous) invalidateViewer(previous, true);
+      const token = signSession({ role: 'admin', sid: createViewer(exp), iat: Date.now(), exp });
       return json(res, 200, { ok: true }, { 'Set-Cookie': cookie('cs_admin', token, { maxAge: 8 * 60 * 60 }) });
     }
 
     if (req.method === 'POST' && pathname === '/api/admin/logout') {
+      const token = adminSession(req);
+      if (!sameOrigin(req)) return json(res, 403, { error: 'Cross-site request blocked.' });
+      if (token) invalidateViewer(token, true);
       return json(res, 200, { ok: true }, { 'Set-Cookie': cookie('cs_admin', '', { maxAge: 0 }) });
     }
 
@@ -1258,8 +1393,8 @@ async function handler(req, res) {
 
     return json(res, 404, { error: 'Not found' });
   } catch (err) {
-    console.error(err);
-    if (!res.headersSent) return json(res, err.status || 500, { error: err.status ? err.message : 'Server error.' });
+    console.error('[request]', err.code || 'REQUEST_FAILED', err.status || 500);
+    if (!res.headersSent) return json(res, err.status || 500, { error: err.status ? err.message : 'Server error.', ...(err.code ? { code: err.code } : {}) }, err.status === 429 ? { 'Retry-After': String(err.retryAfter || 60) } : {});
     res.end();
   }
 }
