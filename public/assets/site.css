@@ -318,7 +318,11 @@ body.watch-open { overflow: hidden; }
 .watch-error { margin: 16px 25px 0; padding: 13px 16px; border: 1px solid var(--warn); border-radius: 11px; background: var(--warn-soft); color: var(--warn); font-size: 13px; line-height: 1.65; }
 .watch-controls { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; padding: 20px 25px 12px; }
 .watch-controls > span { color: var(--muted); font-size: 12px; }
-.watch-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
+.watch-buttons { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.watch-quality-wrap { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; font-weight: 650; }
+.watch-quality-select { min-height: 42px; padding: 6px 28px 6px 12px; border: 1px solid var(--line2); border-radius: 11px; background: var(--panel); color: var(--text); font-size: 13px; font-weight: 700; cursor: pointer; }
+.watch-quality-select:hover { background: var(--panel2); border-color: var(--muted); }
+.watch-quality-select:focus { border-color: var(--focus); outline: none; }
 .watch-footnote { padding: 0 25px 24px; margin: 14px 0 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
 .watch-help-section { margin: 10px 25px 0; border: 1px solid var(--line2); border-radius: 14px; overflow: hidden; background: var(--panel); }
 .watch-help-toggle { display: flex; align-items: center; justify-content: space-between; gap: 14px; width: 100%; padding: 16px; border: 0; background: var(--panel2); color: var(--text); text-align: left; font-size: 14px; font-weight: 700; }

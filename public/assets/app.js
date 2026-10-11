@@ -10,6 +10,9 @@ let WATCH_ID=null;
 let WATCH_LAST_FOCUS=null;
 let WATCH_GUIDE=null;
 let WATCH_VIEW_GENERATION=0;
+let WATCH_URL=null;
+let WATCH_RAW_URL=null;
+let WATCH_QUALITY='auto';
 const PLAYBACK_REQUESTS=new PlaybackRequestState();
 let INFINITY_CONNECTED=false;
 let CONNECT_CONTROLLER=null;
@@ -235,6 +238,8 @@ function setWatchError(message){
 function updateWatchSource(x){
   const video=$('#watchVideo');
   const frame=$('#watchFrame');
+  const qualityWrap=$('#watchQualityWrap');
+  const qualitySelect=$('#watchQuality');
   const embed=safeBunnyEmbed(x?.embedUrl);
   const url=safeExternalUrl(x?.download);
   video.pause();video.removeAttribute('src');video.load();
@@ -246,13 +251,62 @@ function updateWatchSource(x){
   const source=embed||url;
   $('#watchOpenExternal').classList.toggle('hidden',!source);
   if(embed){
+    WATCH_URL=null;WATCH_RAW_URL=null;WATCH_QUALITY='auto';
+    qualityWrap?.classList.add('hidden');
     frame.src=embed;
   }else if(url){
+    WATCH_RAW_URL=url;
+    WATCH_URL=url;
+    const match=url.match(/(?:play_|_|-)(\d+p)\.mp4/i);
+    WATCH_QUALITY=match?match[1].toLowerCase():'auto';
+    if(qualitySelect)qualitySelect.value=WATCH_QUALITY;
+    qualityWrap?.classList.remove('hidden');
     video.src=url;
     video.load();
+  }else{
+    WATCH_URL=null;WATCH_RAW_URL=null;WATCH_QUALITY='auto';
+    qualityWrap?.classList.add('hidden');
+    if(qualitySelect)qualitySelect.value='auto';
   }
   video.classList.toggle('hidden',Boolean(embed)||!url);
   $('#watchPlaceholder').classList.toggle('hidden',Boolean(source));
+}
+function switchWatchQuality(targetQuality){
+  const video=$('#watchVideo');
+  if(!WATCH_URL||!video)return;
+  let newUrl=WATCH_URL;
+  if(targetQuality==='auto'){
+    newUrl=WATCH_RAW_URL||WATCH_URL;
+  }else if(/play_\d+p\.mp4/i.test(WATCH_URL)){
+    newUrl=WATCH_URL.replace(/play_\d+p\.mp4/i,`play_${targetQuality}.mp4`);
+  }else if(/(?:_|-)\d+p\.mp4/i.test(WATCH_URL)){
+    newUrl=WATCH_URL.replace(/([_-])\d+p\.mp4/i,`$1${targetQuality}.mp4`);
+  }else if(/playlist\.m3u8/i.test(WATCH_URL)){
+    newUrl=WATCH_URL.replace(/playlist\.m3u8/i,`play_${targetQuality}.mp4`);
+  }else if(/\.b-cdn\.net\/[^/?#]+\/[^/?#]+\.mp4/i.test(WATCH_URL)){
+    newUrl=WATCH_URL.replace(/(\.b-cdn\.net\/[^/?#]+\/)[^/?#]+\.mp4/i,`$1play_${targetQuality}.mp4`);
+  }else if(/\.b-cdn\.net\/[^/?#]+\.mp4/i.test(WATCH_URL)){
+    newUrl=WATCH_URL.replace(/(\.b-cdn\.net\/)[^/?#]+\.mp4/i,`$1play_${targetQuality}.mp4`);
+  }
+  if(!newUrl||newUrl===video.getAttribute('src'))return;
+  const prevTime=video.currentTime||0;
+  const isPlaying=!video.paused;
+  WATCH_URL=newUrl;
+  WATCH_QUALITY=targetQuality;
+  const restore=()=>{
+    video.removeEventListener('loadedmetadata',restore);
+    try{
+      if(prevTime>0&&Number.isFinite(prevTime)){
+        video.currentTime=Math.min(prevTime,video.duration||prevTime);
+      }
+      if(isPlaying){
+        video.play().catch(()=>{});
+      }
+    }catch{}
+  };
+  video.addEventListener('loadedmetadata',restore);
+  video.src=newUrl;
+  video.load();
 }
 async function loadWatchGuide(){
   const generation=WATCH_VIEW_GENERATION;
@@ -306,6 +360,7 @@ function closeWatch(){
   PLAYBACK_REQUESTS.cancel();PENDING_WATCH=null;
   const video=$('#watchVideo');video.pause();video.removeAttribute('src');video.load();
   $('#watchFrame').removeAttribute('src');
+  $('#watchQualityWrap')?.classList.add('hidden');
   $('#watchOverlay').classList.add('hidden');$('#watchOverlay').setAttribute('aria-hidden','true');
   document.body.classList.remove('watch-open');WATCH_ID=null;
   WATCH_LAST_FOCUS?.focus?.();
@@ -350,7 +405,7 @@ async function viewerVisitorId(){
 async function refreshVideo(videoId,button,externalWindow=null){
   if(WATCH_ID!==Number(videoId)){openWatch(videoId);externalWindow?.close();return}
   const request=PLAYBACK_REQUESTS.begin();
-  $('#watchRefresh').disabled=true;$('#watchOpenExternal').disabled=true;
+  $('#watchRefresh').disabled=true;$('#watchOpenExternal').disabled=true;if($('#watchQuality'))$('#watchQuality').disabled=true;
   updateWatchSource(null);setWatchError('Loading an authorized video link…');
   try{
     if(!INFINITY_CONNECTED){PENDING_WATCH={id:Number(videoId),generation:request.generation};externalWindow?.close();setWatchError('Connect your Infinity account to watch this video.');showInfinityDialog();return}
@@ -365,7 +420,7 @@ async function refreshVideo(videoId,button,externalWindow=null){
     updateWatchSource(data.kind==='embed'?{embedUrl:data.url}:{download:data.url});setWatchError('');
     if(externalWindow){externalWindow.location.replace(data.url)}
   }catch(err){externalWindow?.close();if(PLAYBACK_REQUESTS.current(request))setWatchError(err.message||'Unable to retrieve the video.')}
-  finally{if(PLAYBACK_REQUESTS.current(request)){$('#watchRefresh').disabled=false;$('#watchOpenExternal').disabled=false}}
+  finally{if(PLAYBACK_REQUESTS.current(request)){$('#watchRefresh').disabled=false;$('#watchOpenExternal').disabled=false;if($('#watchQuality'))$('#watchQuality').disabled=false}}
 }
 
 function resourceRow(x,index,matchedIds){
@@ -514,6 +569,7 @@ $('#watchHelpCopy').addEventListener('click',async()=>{
   catch{toast('Could not copy automatically. Select the code and copy it manually.','error')}
 });
 $('#watchClose').addEventListener('click',closeWatch);
+$('#watchQuality')?.addEventListener('change',e=>switchWatchQuality(e.target.value));
 function newPlaybackWindow(){const popup=window.open('about:blank','_blank');if(popup)popup.opener=null;return popup}
 $('#watchOpenExternal').addEventListener('click',()=>{if(WATCH_ID!==null)refreshVideo(WATCH_ID,null,newPlaybackWindow())});
 $('#infinityConnect').addEventListener('click',showInfinityDialog);
@@ -621,7 +677,7 @@ document.addEventListener('keydown',e=>{
   if($('#infinityDialog').open)return;
   if(e.key==='Escape'&&!$('#watchOverlay').classList.contains('hidden')){closeWatch();return}
   if(e.key==='Tab'&&!$('#watchOverlay').classList.contains('hidden')){
-    const focusable=[...$('#watchOverlay').querySelectorAll('button,a[href],video,iframe,[tabindex="0"]')].filter(el=>!el.disabled&&!el.closest('.hidden'));
+    const focusable=[...$('#watchOverlay').querySelectorAll('button,a[href],video,iframe,select,[tabindex="0"]')].filter(el=>!el.disabled&&!el.closest('.hidden'));
     const first=focusable[0],last=focusable[focusable.length-1];
     if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus()}
   }
