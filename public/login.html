@@ -3,22 +3,26 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Course Search — Private Access</title>
-<link rel="stylesheet" href="/assets/site.css?v=1.10.1">
+<meta name="theme-color" content="#fffdf8">
+<title>StudyStream — Private Access</title>
+<script src="/assets/appearance.js?v=1.12.0"></script>
+<link rel="stylesheet" href="/assets/site.css?v=1.12.0">
 </head>
 <body>
+<div class="auth-utility"><label class="appearance-control"><span>Appearance</span><select data-appearance-select aria-label="Appearance"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label></div>
 <main class="auth-shell">
   <section class="auth-card">
-    <div class="auth-mark">S</div>
+    <div class="auth-brand"><img class="auth-mark" src="/assets/art/mark.svg" alt=""><strong>StudyStream</strong></div>
+    <div class="auth-illustration" aria-hidden="true"><img src="/assets/art/books.svg" alt=""></div>
     <div class="eyebrow">Private library</div>
     <h1>Enter your access code.</h1>
-    <p>This course search is private. Use a valid code from the administrator to continue.</p>
+    <p>Your study library is private. Use a valid code from the administrator to continue.</p>
     <form id="loginForm">
       <div class="field">
         <label for="code">Access code</label>
         <input class="input" id="code" name="code" autocomplete="one-time-code" spellcheck="false" placeholder="CS-XXXX-XXXX-XXXX" autofocus>
       </div>
-      <button class="btn primary block" id="loginBtn" type="submit">Unlock course search</button>
+      <button class="btn primary block" id="loginBtn" type="submit">Open StudyStream</button>
       <div class="error" id="error"></div>
     </form>
     <div class="auth-footer"><span>Codes can expire or be revoked.</span><a href="/admin">Admin panel →</a></div>

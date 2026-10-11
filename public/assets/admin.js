@@ -25,7 +25,7 @@ function labelInputRow(kind,item){
     ?item.subjectIds.map(id=>LABEL_INFO.subjects?.[String(id)]||`Subject ${id}`).join(', ')
     :'';
   const meta=[`${Number(item.count||0).toLocaleString()} items`,subjectText,item.exampleLesson||''].filter(Boolean).map(esc).join(' · ');
-  return `<label class="label-map-row ${value?'':'unnamed'}">
+  return `<label class="label-map-row ${value?'':'unnamed'}" ${kind==='subjects'?`data-art="${StudyStreamArtwork.forSubject(item.id,value).palette}"`:''}>
     <div class="label-map-id"><span>ID</span><strong>${esc(item.id)}</strong></div>
     <div class="label-map-main"><input class="input label-name-input" data-label-kind="${kind}" data-label-id="${esc(item.id)}" value="${esc(value)}" placeholder="${esc(fallback)}"><div class="label-map-meta">${meta}</div></div>
   </label>`;

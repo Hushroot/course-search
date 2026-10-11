@@ -24,10 +24,10 @@ const truth=v=>v===true||v===1||v==='1'||String(v).toLowerCase()==='true';
 const cleanId=v=>v===null||v===undefined?'':String(v).trim();
 
 const GRADES={
-  g10:{label:'Grade 10',short:'G10',sections:['6'],kicker:'Foundation year',title:'Build the base. Find anything fast.',text:'Your Grade 10 subjects, teachers, lessons, videos, PDFs, and practice resources in one focused space.',accent:'#5ee6ff',accent2:'#60a5fa'},
-  g11:{label:'Grade 11',short:'G11',sections:['7'],kicker:'Momentum year',title:'Level up without losing the thread.',text:'A cleaner Grade 11 workspace for deeper STEM concepts, language courses, revision resources, and everything in between.',accent:'#b794ff',accent2:'#f472b6'},
-  g12:{label:'Grade 12',short:'G12',sections:['8','9'],kicker:'Finals year',title:'Lock in. Your final-year library is here.',text:'Grade 12 lessons, revisions, classified questions, videos, PDFs, and final prep—organized to get you to the right thing fast.',accent:'#ffd166',accent2:'#ff7a59'},
-  all:{label:'Full library',short:'ALL',sections:null,kicker:'Every program',title:'Everything. One search.',text:'Browse every grade and special program in the private library, including resources outside the main G10–G12 sections.',accent:'#e7ff5b',accent2:'#77e4ad'}
+  g10:{label:'Grade 10',short:'G10',sections:['6'],kicker:'Foundation year'},
+  g11:{label:'Grade 11',short:'G11',sections:['7'],kicker:'Momentum year'},
+  g12:{label:'Grade 12',short:'G12',sections:['8','9'],kicker:'Finals year'},
+  all:{label:'Full library',short:'ALL',sections:null,kicker:'Every program'}
 };
 
 const state={grade:'g10',q:'',subject:'',teacher:'',type:'',access:'',sort:'newest',favoritesOnly:false,limit:30};
@@ -158,12 +158,14 @@ function rebuildFilters(){
 }
 
 function renderQuickSubjects(){
+  const focusedSubject=document.activeElement?.closest('#quickSubjects [data-subject]')?.dataset.subject;
   const rows=gradeRows();
   const counts=new Map();
   rows.forEach(x=>{const id=String(x.subject??'');if(id)counts.set(id,(counts.get(id)||0)+1)});
   const items=[...counts.entries()].sort((a,b)=>b[1]-a[1]).slice(0,7);
-  $('#quickSubjects').innerHTML=`<button class="subject-chip ${state.subject?'':'active'}" data-subject="" type="button">All subjects</button>`+items.map(([id,count])=>`<button class="subject-chip ${state.subject===id?'active':''}" data-subject="${esc(id)}" type="button"><span>${esc(subjectIcon(displaySubject(id)))}</span>${esc(displaySubject(id))}<small>${count}</small></button>`).join('');
+  $('#quickSubjects').innerHTML=`<button class="subject-chip ${state.subject?'':'active'}" data-subject="" type="button" aria-pressed="${!state.subject}">All subjects</button>`+items.map(([id,count])=>`<button class="subject-chip ${state.subject===id?'active':''}" data-subject="${esc(id)}" data-art="${StudyStreamArtwork.forSubject(id,displaySubject(id)).palette}" aria-pressed="${state.subject===id}" type="button"><span>${esc(subjectIcon(displaySubject(id)))}</span>${esc(displaySubject(id))}<small>${count}</small></button>`).join('');
   $$('#quickSubjects [data-subject]').forEach(btn=>btn.onclick=()=>{state.subject=btn.dataset.subject;$('#subject').value=state.subject;state.limit=30;renderQuickSubjects();render()});
+  if(focusedSubject!==undefined)$$('#quickSubjects [data-subject]').find(btn=>btn.dataset.subject===focusedSubject)?.focus({preventScroll:true});
 }
 
 function renderGradeGate(){
@@ -186,35 +188,26 @@ function setGrade(grade,persist=true){
   if(persist&&grade!=='all')localStorage.setItem(GRADE_KEY,grade);
   document.body.dataset.grade=grade;
   const g=currentGrade();
-  document.documentElement.style.setProperty('--grade-accent',g.accent);
-  document.documentElement.style.setProperty('--grade-accent-2',g.accent2);
-  $('#brandGrade').textContent=`${g.label} library`;
-  $('#heroGradeBadge').textContent=g.short;
-  $('#heroKicker').textContent=g.kicker;
-  $('#heroTitle').textContent=g.title;
-  $('#heroText').textContent=g.text;
-  $('#resultKicker').textContent=`${g.label} library`;
-  $$('#gradeTabs [data-grade]').forEach(b=>b.classList.toggle('active',b.dataset.grade===grade));
+  const libraryLabel=grade==='all'?'Full library':`${g.label} library`;
+  $('#brandGrade').textContent=libraryLabel;
+  $('#resultKicker').textContent=libraryLabel;
+  $$('#gradeTabs [data-grade]').forEach(b=>{b.classList.toggle('active',b.dataset.grade===grade);b.setAttribute('aria-pressed',String(b.dataset.grade===grade))});
+  $('#browseAllMenuBtn').classList.toggle('active',grade==='all');
+  $('#browseAllMenuBtn').setAttribute('aria-pressed',String(grade==='all'));
   $('#gradeTabs').classList.toggle('all-mode',grade==='all');
   rebuildFilters();
-  updateStats();
   syncControls();
   render();
-}
-
-function updateStats(){
-  const rows=gradeRows();
-  $('#statLessons').textContent=new Set(rows.map(lessonKey)).size.toLocaleString();
-  $('#statResources').textContent=rows.length.toLocaleString();
-  $('#statSubjects').textContent=unique(rows,'subject').length.toLocaleString();
-  $('#statTeachers').textContent=unique(rows,'teacher').length.toLocaleString();
 }
 
 function activeFilterCount(){return ['subject','teacher','type','access'].filter(k=>state[k]).length+(state.favoritesOnly?1:0)}
 function syncControls(){
   $('#subject').value=state.subject;$('#teacher').value=state.teacher;$('#type').value=state.type;$('#access').value=state.access;$('#sort').value=state.sort;
   $('#favoritesOnly').classList.toggle('active',state.favoritesOnly);
+  $('#favoritesOnly').setAttribute('aria-pressed',String(state.favoritesOnly));
   const n=activeFilterCount();$('#activeFilterCount').textContent=n;$('#activeFilterCount').classList.toggle('hidden',!n);
+  $('#filterState').textContent=[state.q?'Search active':'',n?`${n} active filter${n===1?'':'s'}`:'',state.sort!=='newest'?$('#sort option:checked').textContent:''].filter(Boolean).join(' · ')||'All lessons';
+  ['subject','teacher','type','access','sort'].forEach(id=>$('#'+id).classList.toggle('filter-active',id==='sort'?state.sort!=='newest':Boolean(state[id])));
   $('#clear').classList.toggle('hidden',!state.q);
 }
 
@@ -380,13 +373,13 @@ function resourceRow(x,index,matchedIds){
   const match=matchedIds.has(String(x.id));
   const url=safeBunnyEmbed(x.embedUrl)||safeExternalUrl(x.download);
   const video=isVideoResource(x);
-  return `<article class="v2-resource ${match?'matched':''}">
+  return `<article class="v2-resource ${match?'matched':''}" data-art="${StudyStreamArtwork.forSubject(x.subject,displaySubject(x.subject)).palette}">
     <div class="resource-kind ${kind}">${icon(kind)}</div>
     <div class="resource-copy"><strong>${esc(x.video||x.topic||'Untitled resource')}</strong><div><span>#${esc(x.id)}</span>${x.topic?`<span>${esc(x.topic)}</span>`:''}${x.type?`<span>${esc(x.type)}</span>`:''}${match?'<em>match</em>':''}</div></div>
     <div class="resource-buttons">
       ${video?`<button class="resource-action resource-watch" data-watch="${esc(x.id)}" type="button">${icon('video')}<span>Watch</span></button>`:''}
       ${video?`<button class="resource-action" data-video-open="${esc(x.id)}" type="button"><span>Open</span>${icon('external')}</button>`:url?`<a class="resource-action" href="${esc(url)}" target="_blank" rel="noopener" referrerpolicy="${esc(playbackReferrerPolicy())}"><span>Open</span>${icon('external')}</a>`:'<span class="resource-unavailable">No direct link</span>'}
-      ${video?`<button class="resource-retry" data-refresh="${esc(x.id)}" type="button" title="Request an updated video link">↻</button>`:''}
+      ${video?`<button class="resource-retry" data-refresh="${esc(x.id)}" type="button" aria-label="Refresh video link for resource ${esc(x.id)}" title="Request an updated video link">↻</button>`:''}
     </div>
   </article>`;
 }
@@ -404,18 +397,20 @@ function groupBlock(group,index,autoOpen){
   const g=GRADES[grade];
   const fav=isFavorite(group.key);
   const matchNote=group.matched.length!==all.length?`<span class="match-badge">${group.matched.length} matched</span>`:'';
-  const kindText=Object.entries(kinds).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([k,n])=>`${n} ${k}`).join(' · ');
-  return `<details class="v2-lesson" data-key="${esc(group.key)}" ${autoOpen?'open':''}>
-    <summary>
-      <div class="lesson-id-pill"><small>LESSON</small><strong>${esc(lessonId)}</strong></div>
+  const kindText=Object.entries(kinds).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([k,n])=>`${n} ${n===1?k:k==='quiz'?'quizzes':k+'s'}`).join(' · ');
+  const artwork=StudyStreamArtwork.forSubject(x.subject,displaySubject(x.subject));
+  const thumbnail=all.map(row=>StudyStreamArtwork.thumbnail(row.lessonThumb)||StudyStreamArtwork.thumbnail(row.thumb)).find(Boolean);
+  return `<details class="v2-lesson" data-key="${esc(group.key)}" data-art="${artwork.palette}" ${autoOpen?'open':''}>
+    <summary id="lesson-card-${index}" aria-controls="lesson-resources-${index}" aria-expanded="${autoOpen}">
+      <div class="lesson-cover"><img class="lesson-art" src="/assets/art/${artwork.asset}.svg" alt="" aria-hidden="true"><span class="lesson-cover-label" aria-hidden="true">${esc(displaySubject(x.subject))}</span>${thumbnail?`<img class="lesson-thumbnail" src="${esc(thumbnail)}" alt="" loading="lazy" decoding="async">`:''}<div class="lesson-id-pill"><small>LESSON</small><strong>${esc(lessonId)}</strong></div></div>
       <div class="lesson-main-copy"><div class="lesson-topline"><span class="grade-mini ${grade}">${esc(g.short)}</span><span class="subject-mini">${esc(displaySubject(x.subject))}</span>${matchNote}</div><h3>${esc(lessonName)}</h3><div class="lesson-meta"><span>${esc(displayTeacher(x.teacher))}</span><span>${topics.length} topic${topics.length===1?'':'s'}</span><span>${all.length} resource${all.length===1?'':'s'}</span><span>${links} direct link${links===1?'':'s'}</span></div></div>
-      <div class="lesson-side"><div class="resource-count-v2"><strong>${all.length}</strong><span>resources</span></div><button class="favorite-btn ${fav?'active':''}" data-favorite="${esc(group.key)}" type="button" title="${fav?'Remove from favorites':'Add to favorites'}">${icon('star')}</button><div class="lesson-chevron-v2"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></div></div>
+      <div class="lesson-side"><span class="inspect-resources">${autoOpen?'Resources open':'Inspect resources'}</span><button class="favorite-btn ${fav?'active':''}" data-favorite="${esc(group.key)}" type="button" aria-pressed="${fav}" aria-label="${fav?'Remove from favorites':'Add to favorites'}: ${esc(lessonName)}" title="${fav?'Remove from favorites':'Add to favorites'}">${icon('star')}</button><div class="lesson-chevron-v2"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></div></div>
     </summary>
-    <div class="lesson-expanded">
-      <div class="lesson-expanded-head"><div><strong>${esc(kindText||'Course resources')}</strong><span>All resources grouped under Lesson ID ${esc(lessonId)}.</span></div><span class="lesson-id-copy">ID ${esc(lessonId)}</span></div>
+   </details>
+    <section class="lesson-expanded" id="lesson-resources-${index}" data-panel-key="${esc(group.key)}" data-art="${artwork.palette}" aria-labelledby="lesson-heading-${index}" ${autoOpen?'':'hidden'}>
+      <div class="lesson-expanded-head"><div><span class="subject-mini">${esc(displaySubject(x.subject))} · ${esc(displayTeacher(x.teacher))} · Lesson ${esc(lessonId)}</span><h3 id="lesson-heading-${index}">${esc(lessonName)}</h3><strong>${esc(kindText||'Course resources')}</strong><span>All resources grouped under Lesson ID ${esc(lessonId)}.</span></div><button class="toolbar-btn" data-close-lesson="${index}" type="button">Close resources ×</button></div>
       <div class="v2-resource-list">${all.map((r,i)=>resourceRow(r,i,matchedIds)).join('')}</div>
-    </div>
-  </details>`;
+    </section>`;
 }
 
 function bindDynamicActions(){
@@ -423,9 +418,32 @@ function bindDynamicActions(){
     e.preventDefault();e.stopPropagation();
     const key=btn.dataset.favorite;
     if(favorites.has(key)){favorites.delete(key);toast('Removed from favorites','neutral')}else{favorites.add(key);toast('Saved to favorites')}
-    saveFavorites();render();
+    saveFavorites();render();($$('.favorite-btn').find(el=>el.dataset.favorite===key)||(mobileBrowse.matches?$('#browseMenuBtn'):$('#favoritesOnly'))).focus({preventScroll:true});
   }));
+  $$('.v2-lesson').forEach(card=>card.addEventListener('toggle',layoutLessonPanels));
+  $$('[data-close-lesson]').forEach(button=>button.onclick=()=>{const summary=$('#lesson-card-'+button.dataset.closeLesson);summary.parentElement.open=false;layoutLessonPanels();summary.focus({preventScroll:true})});
 }
+function layoutLessonPanels(){
+  const root=$('#results');
+  const cards=$$('.v2-lesson');
+  const columns=Math.max(1,getComputedStyle(root).gridTemplateColumns.split(' ').length);
+  const focused=document.activeElement;
+  cards.forEach((card,index)=>{
+    const summary=card.querySelector('summary');
+    const panel=document.getElementById(summary.getAttribute('aria-controls'));
+    panel.hidden=!card.open;
+    summary.setAttribute('aria-expanded',String(card.open));
+    card.querySelector('.inspect-resources').textContent=card.open?'Resources open':'Inspect resources';
+    const rowEnd=cards[Math.min(cards.length-1,Math.floor(index/columns)*columns+columns-1)];
+    // Move only resource panels, never cards: opening leaves summary focus/scroll intact.
+    const nextCard=cards[cards.indexOf(rowEnd)+1]||null;
+    if(panel.nextElementSibling!==nextCard)root.insertBefore(panel,nextCard);
+  });
+  if(focused?.isConnected&&document.activeElement!==focused)focused.focus({preventScroll:true});
+}
+new ResizeObserver(()=>layoutLessonPanels()).observe($('#results'));
+let renderedFilterSignature='';
+document.addEventListener('error',event=>{if(event.target.matches?.('.lesson-thumbnail'))event.target.remove()},true);
 
 function render(){
   if(!DATA.length)return;
@@ -433,16 +451,21 @@ function render(){
   const shown=groups.slice(0,state.limit);
   const matchedRows=groups.reduce((n,g)=>n+g.matched.length,0);
   $('#matchCount').textContent=groups.length.toLocaleString();
+  $('#groupCountLabel').textContent=groups.length===1?'lesson group':'lesson groups';
   const gradeTotal=gradeRows().length;
   const searchNote=state.q?` · ${matchedRows.toLocaleString()} matching resources`:'';
   $('#summary').textContent=`${gradeTotal.toLocaleString()} resources in this view${searchNote}`;
   const autoOpen=Boolean(state.q.trim())&&groups.length<=8;
-  $('#results').innerHTML=shown.map((g,i)=>groupBlock(g,i,autoOpen&&i<8)).join('');
+  const signature=JSON.stringify([state.grade,state.q,state.subject,state.teacher,state.type,state.access,state.sort,state.favoritesOnly]);
+  const previous=new Map($$('.v2-lesson').map(card=>[card.dataset.key,card.open]));
+  $('#results').innerHTML=shown.map((g,i)=>groupBlock(g,i,signature===renderedFilterSignature&&previous.has(g.key)?previous.get(g.key):autoOpen&&i<8)).join('');
+  renderedFilterSignature=signature;
   $('#empty').classList.toggle('hidden',groups.length!==0);
   $('#loadWrap').classList.toggle('hidden',groups.length<=state.limit);
   syncControls();
   renderQuickSubjects();
   bindDynamicActions();
+  layoutLessonPanels();
 }
 
 function resetFilters(keepGrade=true){
@@ -539,19 +562,52 @@ $('#watchVideo').addEventListener('error',()=>{
 });
 
 let searchTimer;
+const mobileBrowse=window.matchMedia('(max-width: 850px)');
+function closeBrowseMenu(){
+  if(!$('#browseDialog').open)return;
+  $('#browseDialog').close();
+  document.body.classList.remove('browse-menu-open');
+  $('#browseMenuBtn').setAttribute('aria-expanded','false');
+  $('#browseMenuBtn').focus({preventScroll:true});
+}
+function positionBrowseNavigation(){
+  const focused=document.activeElement;
+  const restore=$('#browseSidebar').contains(focused);
+  if(!mobileBrowse.matches)closeBrowseMenu();
+  (mobileBrowse.matches?$('#mobileSidebarSlot'):$('#sidebarSlot')).appendChild($('#browseSidebar'));
+  if(restore&&!mobileBrowse.matches)focused.focus({preventScroll:true});
+}
+mobileBrowse.addEventListener('change',positionBrowseNavigation);
+positionBrowseNavigation();
+$('#browseMenuBtn').onclick=()=>{
+  $('#browseDialog').showModal();
+  document.body.classList.add('browse-menu-open');
+  $('#browseMenuBtn').setAttribute('aria-expanded','true');
+  $('#browseMenuClose').focus();
+};
+$('#browseMenuClose').onclick=closeBrowseMenu;
+$('#browseDialog').addEventListener('cancel',event=>{event.preventDefault();closeBrowseMenu()});
+$('#browseDialog').addEventListener('click',event=>{if(event.target===$('#browseDialog'))closeBrowseMenu()});
+$('#browseDialog').addEventListener('keydown',event=>{
+  if(event.key!=='Tab'||$('#infinityDialog').open)return;
+  const controls=[...$('#browseDialog').querySelectorAll('button,a[href],select,input')].filter(el=>!el.disabled&&el.getClientRects().length);
+  const first=controls[0],last=controls[controls.length-1];
+  if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus()}
+  else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus()}
+});
 $('#q').addEventListener('input',e=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.q=e.target.value;state.limit=30;render()},70)});
 $('#clear').onclick=()=>{state.q='';$('#q').value='';state.limit=30;render();$('#q').focus()};
 ['subject','teacher','type','access','sort'].forEach(id=>$('#'+id).addEventListener('change',e=>{state[id]=e.target.value;state.limit=30;render()}));
 $('#favoritesOnly').onclick=()=>{state.favoritesOnly=!state.favoritesOnly;state.limit=30;render()};
 $('#reset').onclick=()=>resetFilters();$('#emptyReset').onclick=()=>resetFilters();
 $('#loadMore').onclick=()=>{state.limit+=30;render()};
-$('#expandAll').onclick=()=>$$('.v2-lesson').forEach(d=>d.open=true);
-$('#collapseAll').onclick=()=>$$('.v2-lesson').forEach(d=>d.open=false);
+$('#expandAll').onclick=()=>{$$('.v2-lesson').forEach(d=>d.open=true);layoutLessonPanels()};
+$('#collapseAll').onclick=()=>{$$('.v2-lesson').forEach(d=>d.open=false);layoutLessonPanels()};
 $('#filterTrigger').onclick=()=>{const p=$('#filterPanel');const open=p.classList.toggle('collapsed')===false;$('#filterTrigger').setAttribute('aria-expanded',String(open))};
 $$('#gradeTabs [data-grade]').forEach(btn=>btn.onclick=()=>setGrade(btn.dataset.grade));
 $('#browseAllBtn').onclick=()=>{setGrade('all',false);closeGradeGate()};
-$('#changeGradeBtn').onclick=()=>{openGradeGate();$('#profileMenu').classList.add('hidden')};
-$('#browseAllMenuBtn').onclick=()=>{setGrade('all',false);$('#profileMenu').classList.add('hidden')};
+$('#changeGradeBtn').onclick=()=>{closeBrowseMenu();openGradeGate()};
+$('#browseAllMenuBtn').onclick=()=>setGrade('all',false);
 $('#profileBtn').onclick=e=>{e.stopPropagation();const m=$('#profileMenu');m.classList.toggle('hidden');$('#profileBtn').setAttribute('aria-expanded',String(!m.classList.contains('hidden')))};
 document.addEventListener('click',e=>{if(!e.target.closest('.v2-top-actions'))$('#profileMenu').classList.add('hidden')});
 $('#logoutBtn').onclick=async()=>{
@@ -560,6 +616,7 @@ $('#logoutBtn').onclick=async()=>{
   if(response.ok)location.href='/';else toast('Logout failed. Please try again.','error');
 };
 document.addEventListener('keydown',e=>{
+  if($('#browseDialog').open)return;
   if($('#watchOverlay').classList.contains('hidden')&&(e.key==='/'||(e.ctrlKey&&e.key.toLowerCase()==='k'))&&!['INPUT','SELECT','TEXTAREA'].includes(document.activeElement?.tagName)){e.preventDefault();$('#q').focus()}
   if($('#infinityDialog').open)return;
   if(e.key==='Escape'&&!$('#watchOverlay').classList.contains('hidden')){closeWatch();return}

@@ -12,6 +12,9 @@ const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
   const state = fs.mkdtempSync('/tmp/opencode/browser-course-');
   const port = 43000 + crypto.randomInt(10000), base = `http://127.0.0.1:${port}`;
   const events = [], errors = []; let server, browser;
+  const settingsFile=path.join(state,'playback-settings.json');
+  const savedSettings=JSON.stringify({siteOrigin:'',referrerPolicy:'no-referrer',updatedAt:'2026-10-12T00:00:00.000Z'});
+  fs.writeFileSync(settingsFile,savedSettings);
   try {
     server = spawn(process.execPath, ['--require','./tests/provider-mock.cjs','server.js'], { cwd: root, env: { ...process.env, STATE_DIR: state, PORT:String(port), ADMIN_PASSWORD:'browser-admin-password',SESSION_SECRET:'browser-session-secret-at-least-32-characters',INFINITY_AUTH_KEY:crypto.randomBytes(32).toString('base64'),INFINITY_COOKIE:'',APP_ORIGIN:base,COOKIE_SECURE:'false',NODE_ENV:'test',AUTO_SCAN_ENABLED:'false' }, stdio:['ignore','pipe','pipe','ipc'] });
     server.on('message', event => events.push(event));
@@ -22,7 +25,8 @@ const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
     browser=await chromium.launch({headless:true,args:['--no-sandbox']});
     const context=await browser.newContext({viewport:{width:1280,height:850}});
     // Never contact a live media CDN, even though the mock returns realistic URLs.
-    await context.route('https://**/*',route=>route.abort());
+    const mediaReferrers=[];
+    await context.route('https://**/*',route=>{if(route.request().url().includes('/alice.mp4'))mediaReferrers.push(Boolean(route.request().headers().referer));return route.abort()});
     const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));
     await page.goto(base);await page.fill('#code','BROWSERSTUDENT');await page.click('button[type="submit"]');await page.waitForURL('**/app');
     await page.click('#browseAllBtn');await page.fill('#q','13112');await page.click('[data-watch="13112"]');
@@ -32,6 +36,9 @@ const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
     assert.equal(await page.inputValue('#infinityPassword'),'');
     await page.waitForFunction(()=>!document.querySelector('#infinityDialog').open&&document.querySelector('#watchVideo').getAttribute('src')?.includes('alice.mp4'));
     assert.equal(await page.textContent('#infinityState'),'Infinity connected');
+    await page.waitForFunction(()=>Boolean(document.querySelector('#watchVideo').error));
+    assert.ok(mediaReferrers.length>0);assert.ok(mediaReferrers.every(sent=>sent===false),'saved no-referrer must suppress actual mocked media request Referer');
+    assert.equal(await page.getAttribute('#siteReferrerPolicy','content'),'no-referrer');
     const secondContext=await browser.newContext();await secondContext.route('https://**/*',route=>route.abort());
     const secondPage=await secondContext.newPage();await secondPage.goto(base);await secondPage.fill('#code','BROWSERSTUDENT');await secondPage.click('button[type="submit"]');await secondPage.waitForURL('**/app');await secondPage.click('#browseAllBtn');
     assert.equal(await secondPage.textContent('#infinityState'),'Not connected');
@@ -68,10 +75,11 @@ const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
     await page.click('[data-watch="13112"]');await page.waitForSelector('#infinityDialog[open]');await page.fill('#infinityEmail','alice@example.test');await page.fill('#infinityPassword','synthetic-password');await page.click('#infinitySubmit');await page.waitForFunction(()=>document.querySelector('#watchVideo').getAttribute('src')?.includes('alice.mp4'));
     await page.click('#watchClose');
     // Mobile layout, keyboard cancellation/focus restoration, and no overflow.
-    await page.setViewportSize({width:390,height:844});await page.click('#infinityConnect');await page.keyboard.press('Escape');assert.equal(await page.evaluate(()=>document.activeElement.id),'infinityConnect');assert.equal(await page.inputValue('#infinityPassword'),'');
+    await page.setViewportSize({width:390,height:844});await page.click('#browseMenuBtn');await page.click('#infinityConnect');await page.keyboard.press('Escape');assert.equal(await page.evaluate(()=>document.activeElement.id),'infinityConnect');assert.equal(await page.inputValue('#infinityPassword'),'');await page.keyboard.press('Escape');assert.equal(await page.evaluate(()=>document.activeElement.id),'browseMenuBtn');
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),'mobile page should not overflow horizontally');
     await page.click('#profileBtn');await page.click('#logoutBtn');await page.waitForURL(base+'/');
     assert.deepEqual(errors,[]);
+    assert.equal(fs.readFileSync(settingsFile,'utf8'),savedSettings,'UI actions must not overwrite saved playback settings');
     console.log('PASS: mocked Chromium flow: connection/resume, repeated Watch/Refresh/Open, guide, focus, close/reopen and switch races, reconnect, mobile and logout. No live login or media tested.');
   } finally {
     await browser?.close();

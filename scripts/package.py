@@ -7,14 +7,14 @@ import sys
 import zipfile
 
 root = pathlib.Path(__file__).resolve().parent.parent
-destination = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else root.parent / 'Downloads/secure_course_search_v1.10_per_user_infinity.zip')
+destination = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else root / 'studystream_v1.12.0_classroom_grid.zip')
 if destination.exists():
     raise SystemExit('Destination exists; inspect it before choosing a new output path.')
 files = ['package.json', 'server.js', 'README.md', '.env.example', '.gitignore', '.railway/README.md',
          'data/labels.json', 'data/playback-hosts.json', 'scripts/setup.js', 'scripts/import_csv.py',
          'scripts/README.txt', 'scripts/package.py']
 for directory in ['public', 'lib', 'tests']:
-    files.extend(str(p.relative_to(root)) for p in (root / directory).rglob('*') if p.is_file() and p.suffix in ['.js', '.cjs', '.html', '.css'])
+    files.extend(str(p.relative_to(root)) for p in (root / directory).rglob('*') if p.is_file() and p.suffix in ['.js', '.cjs', '.html', '.css', '.svg'])
 rows = json.loads((root / 'data/courses.json').read_text())
 for row in rows:
     url = str(row.get('download') or row.get('path') or '').split('?')[0]

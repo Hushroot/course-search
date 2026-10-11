@@ -3,17 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#071018">
+<meta name="theme-color" content="#fffdf8">
 <meta name="referrer" content="origin" id="siteReferrerPolicy">
-<title>Course Search</title>
-<link rel="stylesheet" href="/assets/site.css?v=1.10.1">
+<title>StudyStream</title>
+<script src="/assets/appearance.js?v=1.12.0"></script>
+<link rel="stylesheet" href="/assets/site.css?v=1.12.0">
 </head>
 <body class="student-app-v2" data-grade="g10">
-<div class="student-bg" aria-hidden="true"><span></span><span></span><span></span></div>
 
 <div class="grade-gate" id="gradeGate" aria-hidden="true">
   <div class="grade-gate-card">
-    <div class="grade-gate-brand"><div class="v2-logo">S</div><div><strong>Course Search</strong><span>Your private study library</span></div></div>
+    <div class="grade-gate-brand"><img class="v2-logo" src="/assets/art/mark.svg" alt=""><div><strong>StudyStream</strong><span>Your private study library</span></div></div>
     <div class="grade-gate-copy"><span class="v2-kicker">Choose your space</span><h1>What grade are you in?</h1><p>We’ll tailor subjects, teachers, lessons, and the whole interface around your grade.</p></div>
     <div class="grade-choice-grid" id="gradeChoiceGrid"></div>
     <button class="grade-all-link" id="browseAllBtn" type="button">Browse the full library instead</button>
@@ -22,60 +22,51 @@
 
 <div class="v2-shell" id="appRoot">
   <header class="v2-topbar">
-    <a class="v2-brand" href="/app" aria-label="Course Search home">
-      <div class="v2-logo">S</div>
-      <div class="v2-brand-copy"><strong>Course Search</strong><span id="brandGrade">Grade 10 library</span></div>
+    <a class="v2-brand" href="/app" aria-label="StudyStream home">
+      <img class="v2-logo" src="/assets/art/mark.svg" alt="">
+      <div class="v2-brand-copy"><strong>StudyStream</strong><span id="brandGrade">Grade 10 library</span></div>
     </a>
 
-    <nav class="grade-tabs" id="gradeTabs" aria-label="Grade switcher">
-      <button data-grade="g10" type="button">G10</button>
-      <button data-grade="g11" type="button">G11</button>
-      <button data-grade="g12" type="button">G12</button>
-    </nav>
+    <div class="v2-search-main" role="search">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.4-3.4"/></svg>
+      <input id="q" autocomplete="off" placeholder="Search lessons, topics, teachers, IDs…" aria-label="Search course library">
+      <kbd>Ctrl K</kbd><button class="search-clear hidden" id="clear" type="button" aria-label="Clear search">×</button>
+    </div>
 
     <div class="v2-top-actions">
-      <div class="infinity-actions"><button class="text-button" id="infinityConnect" type="button">Connect Infinity account</button><span id="infinityState" role="status">Not connected</span><button class="text-button hidden" id="infinityDisconnect" type="button">Disconnect</button></div>
-      <div class="live-pill"><span></span>Auto-synced</div>
+      <label class="appearance-control"><span>Appearance</span><select data-appearance-select aria-label="Appearance"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
       <a class="v2-icon-btn hidden" id="adminLink" href="/admin" title="Admin panel" aria-label="Admin panel">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.6v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3V9.6h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.08.37.3.72.6 1 .3.27.7.4 1.1.4H21v4h-.09c-.4 0-.8.13-1.1.4-.3.28-.52.63-.6 1Z"/></svg>
       </a>
-      <button class="profile-button" id="profileBtn" type="button" aria-haspopup="true" aria-expanded="false"><span class="profile-avatar">S</span><span class="profile-copy"><strong id="sessionLabel">Private access</strong><small>Account</small></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></button>
+      <button class="profile-button" id="profileBtn" type="button" aria-label="Account menu" aria-haspopup="true" aria-expanded="false"><span class="profile-avatar">S</span><span class="profile-copy"><strong id="sessionLabel">Private access</strong><small>Account</small></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></button>
       <div class="profile-menu hidden" id="profileMenu">
-        <button id="changeGradeBtn" type="button">Change grade</button>
-        <button id="browseAllMenuBtn" type="button">Browse all programs</button>
         <a class="hidden" id="adminMenuLink" href="/admin">Admin panel</a>
         <button id="logoutBtn" type="button">Log out</button>
       </div>
     </div>
   </header>
+  <div class="browse-layout">
+    <div id="sidebarSlot">
+      <aside class="browse-sidebar" id="browseSidebar" aria-label="Library navigation">
+        <span class="eyebrow">Your library</span>
+        <button class="sidebar-link" id="browseAllMenuBtn" type="button"><span aria-hidden="true">▦</span> Full library</button>
+        <nav class="grade-tabs" id="gradeTabs" aria-label="Grade switcher">
+          <button data-grade="g10" type="button"><span aria-hidden="true">10</span> Grade 10</button>
+          <button data-grade="g11" type="button"><span aria-hidden="true">11</span> Grade 11</button>
+          <button data-grade="g12" type="button"><span aria-hidden="true">12</span> Grade 12</button>
+        </nav>
+        <button id="favoritesOnly" class="soft-toggle sidebar-link" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9L12 3Z"/></svg>Favorites only</button>
+        <button class="text-button" id="changeGradeBtn" type="button">Choose grade…</button>
+        <div class="sidebar-connection"><span class="eyebrow">Infinity account</span><div class="infinity-actions"><button class="text-button" id="infinityConnect" type="button">Connect Infinity account</button><span id="infinityState" role="status">Not connected</span><button class="text-button hidden" id="infinityDisconnect" type="button">Disconnect</button></div></div>
+        <div class="live-pill"><span></span>Auto-synced library</div>
+      </aside>
+    </div>
+  <main class="browse-main">
+    <section class="browse-filters" aria-label="Browse filters">
+      <div class="subject-strip"><button class="toolbar-btn mobile-menu-button" id="browseMenuBtn" type="button" aria-haspopup="dialog" aria-controls="browseDialog" aria-expanded="false">☰ <span>Browse</span></button><div class="quick-subjects" id="quickSubjects" aria-label="Subjects"></div></div>
+      <button class="filter-trigger" id="filterTrigger" type="button" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M4 7h16M7 12h10M10 17h4"/></svg><span>Filters</span><b id="activeFilterCount" class="hidden">0</b></button>
 
-  <main>
-    <section class="grade-hero" id="gradeHero">
-      <div class="grade-orb grade-orb-a"></div><div class="grade-orb grade-orb-b"></div>
-      <div class="hero-copy">
-        <div class="hero-eyebrow"><span id="heroGradeBadge">G10</span><span id="heroKicker">Foundation year</span></div>
-        <h1 id="heroTitle">Build the base. Find anything fast.</h1>
-        <p id="heroText">Your Grade 10 subjects, teachers, lessons, videos, PDFs, and practice resources in one place.</p>
-      </div>
-      <div class="hero-stats" id="heroStats">
-        <div><strong id="statLessons">0</strong><span>Lessons</span></div>
-        <div><strong id="statResources">0</strong><span>Resources</span></div>
-        <div><strong id="statSubjects">0</strong><span>Subjects</span></div>
-        <div><strong id="statTeachers">0</strong><span>Teachers</span></div>
-      </div>
-    </section>
-
-    <section class="v2-search-card" id="searchCard">
-      <div class="v2-search-main">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.4-3.4"/></svg>
-        <input id="q" autocomplete="off" placeholder="Search lessons, videos, topics, teachers, IDs…" aria-label="Search course library">
-        <kbd>Ctrl K</kbd>
-        <button class="search-clear hidden" id="clear" type="button" aria-label="Clear search">×</button>
-      </div>
-      <button class="filter-trigger" id="filterTrigger" type="button" aria-expanded="true"><svg viewBox="0 0 24 24"><path d="M4 7h16M7 12h10M10 17h4"/></svg><span>Filters</span><b id="activeFilterCount" class="hidden">0</b></button>
-
-      <div class="v2-filter-panel" id="filterPanel">
-        <div class="quick-subjects" id="quickSubjects"></div>
+      <div class="v2-filter-panel collapsed" id="filterPanel">
         <div class="filter-controls">
           <label><span>Subject</span><select id="subject"><option value="">All subjects</option></select></label>
           <label><span>Teacher</span><select id="teacher"><option value="">All teachers</option></select></label>
@@ -83,12 +74,12 @@
           <label><span>Access</span><select id="access"><option value="">Any access</option><option value="link">Has direct link</option><option value="free">Free lesson</option><option value="paid">Paid lesson</option></select></label>
           <label><span>Sort</span><select id="sort"><option value="newest">Newest lesson ID</option><option value="relevance">Best match</option><option value="resources">Most resources</option><option value="az">Lesson A–Z</option><option value="oldest">Oldest lesson ID</option></select></label>
         </div>
-        <div class="filter-footer"><button id="favoritesOnly" class="soft-toggle" type="button"><svg viewBox="0 0 24 24"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9L12 3Z"/></svg>Favorites only</button><button class="text-button" id="reset" type="button">Reset everything</button></div>
+        <div class="filter-footer"><span id="filterState" role="status">All lessons</span><button class="text-button" id="reset" type="button">Reset everything</button></div>
       </div>
     </section>
 
     <section class="library-toolbar">
-      <div><span class="result-kicker" id="resultKicker">Grade 10 library</span><h2><span id="matchCount">0</span> lesson groups</h2><p id="summary">Loading your library…</p></div>
+      <div><span class="result-kicker" id="resultKicker">Grade 10 library</span><h2><span id="matchCount">0</span> <span id="groupCountLabel">lesson groups</span></h2><p id="summary">Loading your library…</p></div>
       <div class="toolbar-actions"><button class="toolbar-btn" id="collapseAll" type="button">Collapse all</button><button class="toolbar-btn" id="expandAll" type="button">Expand visible</button></div>
     </section>
 
@@ -99,12 +90,14 @@
       <div class="load-wrap hidden" id="loadWrap"><button class="load-more-v2" id="loadMore" type="button">Load more lessons</button></div>
     </section>
   </main>
+  </div>
 </div>
+<dialog class="browse-dialog" id="browseDialog" aria-labelledby="browseDialogTitle"><div class="browse-dialog-heading"><h2 id="browseDialogTitle">Browse library</h2><button class="watch-close" id="browseMenuClose" type="button" aria-label="Close browse menu">×</button></div><div id="mobileSidebarSlot"></div></dialog>
 
 <div class="watch-overlay hidden" id="watchOverlay" role="dialog" aria-modal="true" aria-labelledby="watchTitle" aria-hidden="true">
   <div class="watch-dialog">
     <div class="watch-heading">
-      <div><span class="watch-kicker">COURSE SEARCH PLAYER</span><h2 id="watchTitle">Video player</h2><p id="watchSubtitle">Watch your course resource</p></div>
+       <div><span class="watch-kicker">STUDYSTREAM PLAYER</span><h2 id="watchTitle">Video player</h2><p id="watchSubtitle">Watch your course resource</p></div>
       <button class="watch-close" id="watchClose" type="button" aria-label="Close player">×</button>
     </div>
     <div class="watch-stage">
@@ -141,7 +134,8 @@
     <div class="infinity-dialog-buttons"><button id="infinityCancel" type="button">Cancel</button><button id="infinitySubmit" type="submit">Connect</button></div>
   </form>
 </dialog>
-<script src="/assets/playback-state.js?v=1.10.1" defer></script>
-<script src="/assets/app.js?v=1.10.1" defer></script>
+<script src="/assets/artwork.js?v=1.12.0" defer></script>
+<script src="/assets/playback-state.js?v=1.12.0" defer></script>
+<script src="/assets/app.js?v=1.12.0" defer></script>
 </body>
 </html>

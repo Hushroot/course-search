@@ -3,13 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Course Search — Admin</title>
-<link rel="stylesheet" href="/assets/site.css?v=1.10.1">
+<meta name="theme-color" content="#fffdf8">
+<title>StudyStream — Admin</title>
+<script src="/assets/appearance.js?v=1.12.0"></script>
+<link rel="stylesheet" href="/assets/site.css?v=1.12.0">
 </head>
 <body>
+<div class="auth-utility"><a class="utility-brand" href="/"><img src="/assets/art/mark.svg" alt="">StudyStream</a><label class="appearance-control"><span>Appearance</span><select data-appearance-select aria-label="Appearance"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label></div>
 <section class="admin-login" id="adminLogin">
   <div class="auth-card">
-    <div class="auth-mark">A</div>
+    <div class="auth-brand"><img class="auth-mark" src="/assets/art/mark.svg" alt=""><strong>StudyStream</strong></div>
     <div class="eyebrow">Administrator</div>
     <h1>Admin access.</h1>
     <p>Sign in with the server-side admin password to manage access codes.</p>
@@ -24,7 +27,7 @@
 
 <main class="admin-shell hidden" id="adminPanel">
   <header class="admin-head">
-    <div class="admin-title"><div class="eyebrow">Course Search</div><h1>Access control</h1><p>Manage access codes plus the names shown for every subject and teacher.</p></div>
+    <div class="admin-title"><div class="eyebrow">StudyStream · administration</div><h1>Access control</h1><p>Manage access codes plus the names shown for every subject and teacher.</p></div>
     <div class="admin-actions"><a class="btn small" href="/app">Open search</a><button class="btn small ghost" id="adminLogout">Log out</button></div>
   </header>
 
@@ -146,6 +149,7 @@
     <div class="error" id="tableError"></div>
   </section>
 </main>
-<script src="/assets/admin.js?v=1.10.1" defer></script>
+<script src="/assets/artwork.js?v=1.12.0" defer></script>
+<script src="/assets/admin.js?v=1.12.0" defer></script>
 </body>
 </html>

@@ -185,7 +185,7 @@ function invalidateViewer(token, closed = false) {
 function viewerConnected(record) { return Boolean(record?.jar && record.connectedUntil > Date.now()); }
 function requireViewer(req) {
   const access = anyAccess(req);
-  if (!access || !viewerRecord(access.token)) throw infinityViewer.failure('COURSE_AUTH_REQUIRED', 'Course Search login required.', 401);
+  if (!access || !viewerRecord(access.token)) throw infinityViewer.failure('COURSE_AUTH_REQUIRED', 'StudyStream login required.', 401);
   return access.token;
 }
 function viewerCsrf(req, token) {
@@ -208,7 +208,7 @@ async function viewerOperation(token, operation) {
   const sid = token.sid;
   if (viewerBusy.has(sid)) throw Object.assign(infinityViewer.failure('REQUEST_BUSY', 'An Infinity request is already running. Please wait.', 429), { retryAfter: 1 });
   const before = viewerRecord(token);
-  if (!before) throw infinityViewer.failure('COURSE_AUTH_REQUIRED', 'Course Search login required.', 401);
+  if (!before) throw infinityViewer.failure('COURSE_AUTH_REQUIRED', 'StudyStream login required.', 401);
   const controller = new AbortController();
   viewerBusy.add(sid); viewerOperations.set(sid, controller);
   const current = () => {
@@ -1052,6 +1052,8 @@ async function handler(req, res) {
     if (req.method === 'GET' && pathname === '/health') return json(res, 200, { ok: true });
 
     if (req.method === 'GET' && pathname === '/assets/site.css') return sendFile(res, routes.css, 'text/css; charset=utf-8', 'no-store');
+    if (req.method === 'GET' && ['/assets/appearance.js','/assets/artwork.js'].includes(pathname)) return sendFile(res, path.join(PUBLIC, pathname.slice(1)), 'text/javascript; charset=utf-8', 'no-store');
+    if (req.method === 'GET' && /^\/assets\/art\/(mark|math|physics|biology|earth|chemistry|books)\.svg$/.test(pathname)) return sendFile(res, path.join(PUBLIC, pathname.slice(1)), 'image/svg+xml', 'no-store');
     if (req.method === 'GET' && pathname === '/assets/app.js') return sendFile(res, routes.appJs, 'text/javascript; charset=utf-8', 'no-store');
     if (req.method === 'GET' && pathname === '/assets/playback-state.js') return sendFile(res, path.join(PUBLIC, 'assets/playback-state.js'), 'text/javascript; charset=utf-8', 'no-store');
     if (req.method === 'GET' && pathname === '/assets/login.js') return sendFile(res, routes.loginJs, 'text/javascript; charset=utf-8', 'no-store');
@@ -1085,7 +1087,7 @@ async function handler(req, res) {
 
     if (req.method === 'POST' && pathname === '/api/logout') {
       const token = userSession(req)?.token;
-      if (!token) throw infinityViewer.failure('COURSE_AUTH_REQUIRED', 'Course Search login required.', 401);
+      if (!token) throw infinityViewer.failure('COURSE_AUTH_REQUIRED', 'StudyStream login required.', 401);
       if (!viewerCsrf(req, token)) return json(res, 403, { error: 'Cross-site request blocked.' });
       invalidateViewer(token, true);
       return json(res, 200, { ok: true }, { 'Set-Cookie': cookie('cs_session', '', { maxAge: 0 }) });
@@ -1401,7 +1403,7 @@ async function handler(req, res) {
 
 const server = http.createServer(handler);
 server.listen(PORT, () => {
-  console.log(`Secure Course Search running on http://localhost:${PORT}`);
+  console.log(`StudyStream running on http://localhost:${PORT}`);
   console.log(`Admin panel: http://localhost:${PORT}/admin`);
   console.log(`[auto-scan] ${AUTO_SCAN_ENABLED ? 'enabled' : 'disabled'} | every ${AUTO_SCAN_INTERVAL_HOURS}h | stop after ${AUTO_SCAN_MAX_MISSES} consecutive misses`);
   if (AUTO_SCAN_ENABLED) {

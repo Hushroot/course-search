@@ -1,4 +1,44 @@
-# Secure Course Search — v1.10.1
+# StudyStream — v1.12.0 · Classroom browsing grid
+
+## v1.12.0 structural revision
+
+The established Classroom colors, typography, artwork and appearance modes are retained. The browsing screen now uses a compact **brand + search + account header**, a narrow desktop sidebar for grades/full library/favorites/Infinity connection, compact subject chips and combined filters, and a **width-driven lesson-card grid**. Covers use a consistent 16:9 proportion and real lesson titles remain fully visible (including long and mixed-language titles). At 1440px the grid shows four cards per row; at 768px it shows two, and narrow phones use one.
+
+The oversized introductory hero, large filter card and full-width lesson summaries have been removed. Grade, result and resource information remains beside navigation/results. On phones, the sidebar's actual controls move into a labeled Browse dialog, with Escape, explicit focus wrapping/restoration, and background scroll locking; search spans the header width. Extra filters can be toggled without hiding subject chips.
+
+Lesson grouping is unchanged. Native summary controls retain keyboard expansion. Each open lesson gets its own full-grid-width resource panel beneath its card row, with the complete lesson title, subject/teacher/ID, all real resources and a Close resources control. Multiple panels, search-driven expansion, Expand visible and Collapse all are preserved. Panels are repositioned when the grid width changes without recreating cards or stealing focus. Favorites retain their existing storage key; per-grade preferences and all authentication/playback behavior remain compatible.
+
+The optional design browser suite checks desktop card geometry, tablet/phone column counts down to 320px, menu focus/scroll behavior, full-width expansion, combined filters and existing theme/browsing regressions. Screenshots use mocked authentication and abort external media/image requests; they are not evidence of live-provider playback. Generate a clean deliverable with `python3 scripts/package.py /path/to/studystream_v1.12.0_classroom_grid.zip`.
+
+### Verification for this revision
+
+- `npm run check`: passed.
+- `npm test`: 28 tests passed, including existing authentication, isolation, cookie-expiration and bounded-request regressions.
+- `npm run test:browser`: mocked Chromium account/player flow passed, including actual intercepted media-request checks for saved `no-referrer` and unchanged settings-file contents.
+- `npm run test:design`: Chromium layout/theme/browsing checks passed at desktop widths 1280/1440/1920px, tablet 768px, and phone widths 390/320px. Covers all thirty visible groups expanding/collapsing, row-spanning panels through resizing, keyboard close/focus restoration, combined filters, favorites, grade preferences, modal Browse controls, OS theme changes, and page overflow.
+- Light/dark screenshots inspected for desktop grids, full-row resources, tablets, phones, and mobile navigation. Screenshots intentionally use temporary test state, real catalog metadata, empty credential fields and no live media.
+
+No runtime dependency, framework, backend authentication change or production configuration change was needed for the composition revision. Live Infinity login/CDN playback is still unverified; Firefox performance work remains out of scope.
+
+## v1.11.0 visual redesign
+
+StudyStream uses the approved **A · Classroom** direction: warm ivory and charcoal light surfaces, coordinated off-white dark surfaces, coral controls, and original lightweight educational SVGs in purple, teal, gold and pink. Existing lesson groups, resource rows, filters, grade selection, favorites and playback actions are unchanged. Real catalog thumbnails are shown when available; missing/rejected thumbnails reveal deterministic subject artwork, not invented portraits or durations.
+
+**Appearance** offers System (default), Light and Dark on the library, login and admin screens. An early external script applies it before styles load. Explicit choices are saved only to `studystream:appearance`; System reacts to OS changes and the preference follows navigation. Existing favorite/grade storage keys, API routes, authentication, encryption, playback retries and deployment settings retain their identifiers and behavior. No recommendations, progress tracking or new onboarding were added.
+
+The visual redesign never saves or resets playback settings. In particular, a saved **`no-referrer`** policy remains effective for the video, iframe, external playback actions and page metadata. No production configuration or infrastructure is changed.
+
+### Try the website locally
+
+Use Node.js 20+ in a separate local directory. For a **new** installation, run `npm run setup`, privately save the generated admin password, then `npm start`. Open `http://localhost:3000/admin`, sign in, create an access code, then use it at `http://localhost:3000/`. Do not run setup over an existing `.env`; preserve its encryption key and point `STATE_DIR` at the intended private state directory. See the security and deployment instructions below. Connecting a real Infinity account is optional for browsing; only authorized real-account testing can verify live playback.
+
+### Visual and regression checks
+
+Run `npm run check` and `npm test`. The optional `npm run test:browser` retains the mocked authentication/playback regression flow. `npm run test:design` adds browser verification for theme selection, OS changes, persistence, navigation, browsing controls, long titles, thumbnail fallbacks, empty/error states, keyboard focus, reduced motion and mobile overflow. Both browser commands use an external Playwright installation via `PLAYWRIGHT_MODULE` and `PLAYWRIGHT_BROWSERS_PATH`; no runtime dependency was added. The design test seeds **only temporary test state** with `no-referrer` and verifies that reloads/theme changes/player actions leave the file unchanged.
+
+To produce safe screenshots from the mocked visual check, set `STUDYSTREAM_SCREENSHOT_DIR` to a separate output directory before running `npm run test:design`. No real provider credentials or live media are used, and connection form fields are empty in screenshots. Screenshots are delivery artifacts, not source ZIP contents. Firefox performance analysis is outside this redesign.
+
+Package with `python3 scripts/package.py /path/to/studystream_v1.12.0_classroom_grid.zip`. The ZIP contains application source, tests and SVG assets, but not `.env`, private authentication, credentials, dependencies, screenshots or temporary artifacts. The top-level `secure_course_search` directory and internal package identifier are kept for compatibility.
 
 ## v1.10.1 playback and cookie fixes
 
@@ -12,10 +52,10 @@
 
 ### Connect, disconnect and reconnect
 
-1. Enter Course Search with your existing access code.
+1. Enter StudyStream with your existing access code.
 2. Select **Connect Infinity account**, enter your own Infinity email/password, then **Connect**. Selecting **Watch** while disconnected opens the same dialog and resumes that video after a confirmed connection.
 3. Every **Watch**, **Refresh video link**, and video **Open** requests the current source with this viewer's Infinity session. A valid URL may be returned unchanged on successive requests.
-4. Select **Disconnect** to remove the saved provider authentication. **Log out** also revokes the Course Search session. Expired/rejected Infinity sessions prompt reconnection; access denial is shown without granting access.
+4. Select **Disconnect** to remove the saved provider authentication. **Log out** also revokes the StudyStream session. Expired/rejected Infinity sessions prompt reconnection; access denial is shown without granting access.
 
 Passwords are used only during login, cleared from the form upon submission, and never saved or logged. Initial cookies and the security token are obtained server-side, the form is submitted with that same cookie jar, provider-origin redirects and cookie updates are processed, and `/student_dashboard/home` is checked for positive authenticated-page evidence (dashboard navigation and a logout action). Unfamiliar pages are rejected rather than falsely reported as connected.
 
