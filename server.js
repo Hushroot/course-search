@@ -1395,8 +1395,8 @@ async function handler(req, res) {
 
     return json(res, 404, { error: 'Not found' });
   } catch (err) {
-    console.error('[request]', err.code || 'REQUEST_FAILED', err.status || 500);
-    if (!res.headersSent) return json(res, err.status || 500, { error: err.status ? err.message : 'Server error.', ...(err.code ? { code: err.code } : {}) }, err.status === 429 ? { 'Retry-After': String(err.retryAfter || 60) } : {});
+    console.error('[request]', err.code || 'REQUEST_FAILED', err.status || 500, err.code === 'PROVIDER_CHALLENGE' ? err.stage : '');
+    if (!res.headersSent) return json(res, err.status || 500, { error: err.status ? err.message : 'Server error.', ...(err.code ? { code: err.code } : {}), ...(err.code === 'PROVIDER_CHALLENGE' && err.stage ? { stage: err.stage } : {}) }, err.status === 429 ? { 'Retry-After': String(err.retryAfter || 60) } : {});
     res.end();
   }
 }

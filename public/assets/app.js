@@ -589,7 +589,19 @@ $('#infinityForm').addEventListener('submit',async e=>{
     try{response=await fetch('/api/infinity/connect',{method:'POST',cache:'no-store',credentials:'same-origin',headers:privateHeaders(),signal:controller.signal,body:payload})}finally{payload=null}
     const data=await response.json().catch(()=>({}));
     if(controller!==CONNECT_CONTROLLER)return;
-    if(!response.ok)throw new Error(data.error||'Unable to connect to Infinity.');
+    if(!response.ok){
+      if(response.status===429){
+        const seconds=Number(response.headers.get('Retry-After'));
+        const wait=Number.isFinite(seconds)&&seconds>0?` Wait at least ${Math.ceil(seconds/60)} minute(s) before retrying.`:' Wait before retrying.';
+        throw new Error((data.error||'Too many requests.')+wait);
+      }
+      if(data.code==='PROVIDER_CHALLENGE'){
+        const stages={login_page:'while opening the Infinity login page',login_submission:'after submitting the login form',account_validation:'while checking the logged-in account'};
+        const where=stages[data.stage]||'during sign-in';
+        throw new Error(`Infinity verification was detected ${where}. Sign in on Infinity directly and complete any provider-required verification. If normal login works, contact the administrator: the integration may be misclassifying the provider response. Repeated retries will trigger rate limiting.`);
+      }
+      throw new Error(data.error||'Unable to connect to Infinity.');
+    }
     setInfinityConnected(true);CONNECT_CONTROLLER=null;closeInfinityDialog();toast('Infinity account connected.');
     const pending=PENDING_WATCH;PENDING_WATCH=null;
     if(pending&&WATCH_ID===pending.id&&PLAYBACK_REQUESTS.generation===pending.generation)refreshVideo(pending.id);

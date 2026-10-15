@@ -108,7 +108,7 @@ test('mocked provider: isolated viewer login, playback, lifecycle and admin regr
       // Distinct synthetic IPs exercise provider classifications independently of local limits.
       const viewer = await viewerLogin();
       const result = await request('/api/infinity/connect', viewer, { email: email+'@example.test', password: 'synthetic-password', visitorId: 'a'.repeat(64) }, { 'X-Real-IP': email });
-      assert.equal(result.data.code, code); assert.equal((await request('/api/infinity/status', viewer)).data.connected, false);
+      assert.equal(result.data.code, code); if(code==='PROVIDER_CHALLENGE') assert.equal(result.data.stage,'login_submission'); assert.equal((await request('/api/infinity/status', viewer)).data.connected, false);
     }
     const viewer = await viewerLogin();
     for (let i=0;i<5;i++) await request('/api/infinity/connect', viewer, { email: 'invalid@example.test', password: 'synthetic-password', visitorId: 'a'.repeat(64) }, { 'X-Real-IP': 'limit'+i });
