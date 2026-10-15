@@ -242,9 +242,9 @@ function normalizeBunnyEmbed(value) {
   }
   let url;
   try { url = new URL(raw); } catch { throw Object.assign(new Error('Invalid Bunny embed URL.'), { status: 400 }); }
-  if (url.protocol !== 'https:' || url.hostname !== 'iframe.mediadelivery.net' || url.port || url.username || url.password || url.hash ||
+  if (url.protocol !== 'https:' || !['iframe.mediadelivery.net', 'player.mediadelivery.net'].includes(url.hostname) || url.port || url.username || url.password || url.hash ||
       !/^\/embed\/\d{1,12}\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i.test(url.pathname)) {
-    throw Object.assign(new Error('Only official https://iframe.mediadelivery.net/embed/{library}/{video-guid} links are allowed.'), { status: 400 });
+    throw Object.assign(new Error('Only official Bunny Stream player embed URLs are allowed.'), { status: 400 });
   }
   return url.toString();
 }
@@ -470,7 +470,7 @@ function securityHeaders(res) {
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; connect-src 'self'; media-src 'self' https:; frame-src https://iframe.mediadelivery.net; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; connect-src 'self'; media-src 'self' https:; frame-src https://iframe.mediadelivery.net https://player.mediadelivery.net; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
 }
 function json(res, status, body, extraHeaders = {}) {
   securityHeaders(res);

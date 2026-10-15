@@ -13,6 +13,8 @@ let WATCH_VIEW_GENERATION=0;
 let WATCH_URL=null;
 let WATCH_RAW_URL=null;
 let WATCH_QUALITY='auto';
+let WATCH_QUALITY_URLS=new Map();
+let WATCH_FALLBACK=null;
 const PLAYBACK_REQUESTS=new PlaybackRequestState();
 let INFINITY_CONNECTED=false;
 let CONNECT_CONTROLLER=null;
@@ -226,7 +228,7 @@ function isVideoResource(x){
 function safeBunnyEmbed(raw){
   try{
     const u=new URL(String(raw||''));
-    return u.protocol==='https:'&&u.hostname==='iframe.mediadelivery.net'&&/^\/embed\/\d+\/[0-9a-f-]{36}\/?$/i.test(u.pathname)?u.href:'';
+    return u.protocol==='https:'&&['iframe.mediadelivery.net','player.mediadelivery.net'].includes(u.hostname)&&/^\/embed\/\d+\/[0-9a-f-]{36}\/?$/i.test(u.pathname)?u.href:'';
   }catch{return ''}
 }
 function playbackReferrerPolicy(){
@@ -243,30 +245,44 @@ function updateWatchSource(x){
   const embed=safeBunnyEmbed(x?.embedUrl);
   const url=safeExternalUrl(x?.download);
   video.pause();video.removeAttribute('src');video.load();
-  // Remove the iframe src whenever it is hidden so the Bunny player stops playing.
   frame.removeAttribute('src');
   frame.referrerPolicy=playbackReferrerPolicy();
   frame.classList.toggle('hidden',!embed);
   video.referrerPolicy=playbackReferrerPolicy();
   const source=embed||url;
   $('#watchOpenExternal').classList.toggle('hidden',!source);
+  WATCH_URL=null;WATCH_RAW_URL=null;WATCH_QUALITY='auto';
+  WATCH_QUALITY_URLS=new Map();WATCH_FALLBACK=null;
+  qualityWrap?.classList.add('hidden');
+  if(qualitySelect)qualitySelect.replaceChildren();
   if(embed){
-    WATCH_URL=null;WATCH_RAW_URL=null;WATCH_QUALITY='auto';
-    qualityWrap?.classList.add('hidden');
+    // The provider's own signed embed handles adaptive qualities itself.
     frame.src=embed;
   }else if(url){
-    WATCH_RAW_URL=url;
-    WATCH_URL=url;
-    const match=url.match(/(?:play_|_|-)(\d+p)\.mp4/i);
-    WATCH_QUALITY=match?match[1].toLowerCase():'auto';
-    if(qualitySelect)qualitySelect.value=WATCH_QUALITY;
-    qualityWrap?.classList.remove('hidden');
-    video.src=url;
-    video.load();
-  }else{
-    WATCH_URL=null;WATCH_RAW_URL=null;WATCH_QUALITY='auto';
-    qualityWrap?.classList.add('hidden');
-    if(qualitySelect)qualitySelect.value='auto';
+    WATCH_URL=url;WATCH_RAW_URL=url;
+    const entries=Array.isArray(x?.qualities)?x.qualities:[];
+    for(const entry of entries){
+      if(typeof entry?.label!=='string'||!/^(?:2160|1440|1080|720|480|360|240)p$|^Original$/.test(entry.label))continue;
+      const authorized=safeExternalUrl(entry.url);
+      if(!authorized||WATCH_QUALITY_URLS.has(entry.label))continue;
+      WATCH_QUALITY_URLS.set(entry.label,authorized);
+    }
+    if(WATCH_QUALITY_URLS.size>1&&new Set(WATCH_QUALITY_URLS.values()).size>1){
+      // Every option comes from Infinity; never guess a CDN filename.
+      for(const [label] of WATCH_QUALITY_URLS){
+        qualitySelect?.add(new Option(label,label));
+      }
+      WATCH_QUALITY=[...WATCH_QUALITY_URLS].find(([,value])=>value===url)?.[0]||'Original';
+      if(!WATCH_QUALITY_URLS.has(WATCH_QUALITY)){
+        WATCH_QUALITY_URLS.set('Original',url);
+        qualitySelect?.add(new Option('Original','Original'));
+      }
+      if(qualitySelect)qualitySelect.value=WATCH_QUALITY;
+      qualityWrap?.classList.remove('hidden');
+    }else{
+      WATCH_QUALITY_URLS.clear();
+    }
+    video.src=url;video.load();
   }
   video.classList.toggle('hidden',Boolean(embed)||!url);
   $('#watchPlaceholder').classList.toggle('hidden',Boolean(source));
@@ -274,39 +290,23 @@ function updateWatchSource(x){
 function switchWatchQuality(targetQuality){
   const video=$('#watchVideo');
   if(!WATCH_URL||!video)return;
-  let newUrl=WATCH_URL;
-  if(targetQuality==='auto'){
-    newUrl=WATCH_RAW_URL||WATCH_URL;
-  }else if(/play_\d+p\.mp4/i.test(WATCH_URL)){
-    newUrl=WATCH_URL.replace(/play_\d+p\.mp4/i,`play_${targetQuality}.mp4`);
-  }else if(/(?:_|-)\d+p\.mp4/i.test(WATCH_URL)){
-    newUrl=WATCH_URL.replace(/([_-])\d+p\.mp4/i,`$1${targetQuality}.mp4`);
-  }else if(/playlist\.m3u8/i.test(WATCH_URL)){
-    newUrl=WATCH_URL.replace(/playlist\.m3u8/i,`play_${targetQuality}.mp4`);
-  }else if(/\.b-cdn\.net\/[^/?#]+\/[^/?#]+\.mp4/i.test(WATCH_URL)){
-    newUrl=WATCH_URL.replace(/(\.b-cdn\.net\/[^/?#]+\/)[^/?#]+\.mp4/i,`$1play_${targetQuality}.mp4`);
-  }else if(/\.b-cdn\.net\/[^/?#]+\.mp4/i.test(WATCH_URL)){
-    newUrl=WATCH_URL.replace(/(\.b-cdn\.net\/)[^/?#]+\.mp4/i,`$1play_${targetQuality}.mp4`);
-  }
-  if(!newUrl||newUrl===video.getAttribute('src'))return;
+  const newUrl=WATCH_QUALITY_URLS.get(targetQuality);
+  // Unrecognized/unprovided resolutions are not authorized.
+  if(!newUrl||newUrl===WATCH_URL)return;
   const prevTime=video.currentTime||0;
   const isPlaying=!video.paused;
+  WATCH_FALLBACK={url:WATCH_URL,quality:WATCH_QUALITY,time:prevTime,playing:isPlaying};
   WATCH_URL=newUrl;
   WATCH_QUALITY=targetQuality;
   const restore=()=>{
     video.removeEventListener('loadedmetadata',restore);
     try{
-      if(prevTime>0&&Number.isFinite(prevTime)){
-        video.currentTime=Math.min(prevTime,video.duration||prevTime);
-      }
-      if(isPlaying){
-        video.play().catch(()=>{});
-      }
+      if(prevTime>0&&Number.isFinite(prevTime))video.currentTime=Math.min(prevTime,video.duration||prevTime);
+      if(isPlaying)video.play().catch(()=>{});
     }catch{}
   };
-  video.addEventListener('loadedmetadata',restore);
-  video.src=newUrl;
-  video.load();
+  video.addEventListener('loadedmetadata',restore,{once:true});
+  video.src=newUrl;video.load();
 }
 async function loadWatchGuide(){
   const generation=WATCH_VIEW_GENERATION;
@@ -417,7 +417,7 @@ async function refreshVideo(videoId,button,externalWindow=null){
       setInfinityConnected(false);$('#infinityState').textContent='Reconnect needed';PENDING_WATCH={id:Number(videoId),generation:request.generation};externalWindow?.close();showInfinityDialog(data.error);setWatchError(data.error);return;
     }
     if(!response.ok)throw new Error(data.error||'Unable to retrieve the video.');
-    updateWatchSource(data.kind==='embed'?{embedUrl:data.url}:{download:data.url});setWatchError('');
+    updateWatchSource(data.kind==='embed'?{embedUrl:data.url}:{download:data.url,qualities:data.qualities});setWatchError('');
     if(externalWindow){externalWindow.location.replace(data.url)}
   }catch(err){externalWindow?.close();if(PLAYBACK_REQUESTS.current(request))setWatchError(err.message||'Unable to retrieve the video.')}
   finally{if(PLAYBACK_REQUESTS.current(request)){$('#watchRefresh').disabled=false;$('#watchOpenExternal').disabled=false;if($('#watchQuality'))$('#watchQuality').disabled=false}}
@@ -626,7 +626,21 @@ $('#infinityDisconnect').addEventListener('click',async()=>{
 $('#watchOverlay').addEventListener('click',e=>{if(e.target===$('#watchOverlay'))closeWatch()});
 $('#watchRefresh').addEventListener('click',()=>{if(WATCH_ID!==null)refreshVideo(WATCH_ID,$('#watchRefresh'))});
 $('#watchVideo').addEventListener('error',()=>{
-  if(WATCH_ID!==null)setWatchError('This video could not be loaded. Its link may have expired, or the CDN may reject this domain, token, or session. Press Refresh video link to fetch its Video ID again.');
+  if(WATCH_ID===null)return;
+  if(WATCH_FALLBACK&&WATCH_URL!==WATCH_FALLBACK.url){
+    // A provider-supplied variant can still expire; restore the previous URL.
+    const previous=WATCH_FALLBACK;WATCH_FALLBACK=null;
+    WATCH_URL=previous.url;WATCH_QUALITY=previous.quality;
+    if($('#watchQuality'))$('#watchQuality').value=previous.quality;
+    const video=$('#watchVideo');
+    video.addEventListener('loadedmetadata',()=>{
+      try{if(Number.isFinite(previous.time)&&previous.time>0)video.currentTime=Math.min(previous.time,video.duration||previous.time);if(previous.playing)video.play().catch(()=>{});}catch{}
+    },{once:true});
+    video.src=previous.url;video.load();
+    setWatchError('That quality was denied or unavailable. Restored the previous authorized video link.');
+    return;
+  }
+  setWatchError('This video could not be loaded. Its link may have expired, or the CDN may reject this domain, token, or session. Press Refresh video link to fetch its Video ID again.');
 });
 
 let searchTimer;
