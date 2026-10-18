@@ -75,6 +75,34 @@ test('upstream network failures, rate limits, login format changes, challenges a
   await assert.rejects(request(new CookieJar(),'/login'),{code:'PROVIDER_REDIRECT'});assert.equal(calls,1);
   global.fetch=async()=>new Response('x'.repeat(2*1024*1024+1));await assert.rejects(request(new CookieJar(),'/login'),{code:'PROVIDER_FORMAT'});
 });
+test('playback ignores generic lesson wording but preserves explicit provider denial', async t => {
+  const original=global.fetch; t.after(()=>{global.fetch=original});
+  const url='https://cdn.example.test/video.mp4';
+  const successful=[
+    {message:'Students can subscribe for course updates',video:{download_url:url}},
+    {view:'<div>Permissions and subscription information for this lesson</div>',video:{download_url:url}},
+    {message:'How to manage permission and subscribe settings',video:{download_url:url}},
+    {message:'This course discusses access denied errors',video:{download_url:url}}
+  ];
+  for(const data of successful){
+    global.fetch=async()=>new Response(JSON.stringify(data),{headers:{'Content-Type':'application/json'}});
+    const result=await playback([],123,hosts);
+    assert.deepEqual(result.source,{kind:'video',url});
+  }
+  for(const data of [
+    {message:'Access denied: this lesson is restricted',video:{download_url:url}},
+    {authorized:false,video:{download_url:url}},
+    {denied:true,video:{download_url:url}},
+    {success:false,video:{download_url:url}},
+    {status:403,video:{download_url:url}}
+  ]){
+    global.fetch=async()=>new Response(JSON.stringify(data),{headers:{'Content-Type':'application/json'}});
+    await assert.rejects(playback([],123,hosts),{code:'VIDEO_DENIED'});
+  }
+  global.fetch=async()=>new Response('forbidden',{status:403});
+  await assert.rejects(playback([],123,hosts),{code:'VIDEO_DENIED'});
+});
+
 test('player generations reject old selections, close/reopen of same ID, logout and stale reconnect continuations', () => {
   const state=new PlaybackRequestState();
   const first=state.begin();const second=state.begin();assert.equal(first.signal.aborted,true);assert.equal(state.current(first),false);assert.equal(state.current(second),true);
