@@ -412,6 +412,13 @@ async function refreshVideo(videoId,button,externalWindow=null){
     const response=await PLAYBACK_REQUESTS.fetch(request,'/api/videos/playback',{method:'POST',cache:'no-store',credentials:'same-origin',headers:privateHeaders(),body:JSON.stringify({videoId:Number(videoId)})});
     const data=await response.json().catch(()=>({}));
     if(!PLAYBACK_REQUESTS.current(request)||WATCH_ID!==Number(videoId)){externalWindow?.close();return}
+    if(response.status===429){
+      const retryAfter=Number(response.headers.get('Retry-After'));
+      const wait=Number.isFinite(retryAfter)&&retryAfter>0
+        ? ` Wait ${Math.ceil(retryAfter)} seconds before trying again.`
+        : ' Please wait before retrying.';
+      throw new Error((data.error||'Playback is temporarily busy.')+wait);
+    }
     if(response.status===401&&data.code==='COURSE_AUTH_REQUIRED'){location.href='/';return}
     if(['RECONNECT_REQUIRED','PROVIDER_DEVICE','PROVIDER_CHALLENGE'].includes(data.code)){
       setInfinityConnected(false);$('#infinityState').textContent='Reconnect needed';PENDING_WATCH={id:Number(videoId),generation:request.generation};externalWindow?.close();showInfinityDialog(data.error);setWatchError(data.error);return;
