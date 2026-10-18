@@ -94,20 +94,21 @@ test('cookie deletion at Unix epoch is honored for new and restored jars', () =>
 });
 
 const busyResponse = (retryAfter = '0') => new Response(JSON.stringify({code:'REQUEST_BUSY'}), {status:429,headers:{'Retry-After':retryAfter,'Content-Type':'application/json'}});
-test('playback busy retries recover but ordinary rate limits and repeated failures stay bounded', async () => {
+test('playback sends one request and never retries busy or rate limited responses', async () => {
   const state = new PlaybackRequestState(); const selected = state.begin(); let calls = 0;
-  const recovered = await state.fetch(selected, '/test', {}, async () => ++calls < 3 ? busyResponse() : new Response('{}'));
-  assert.equal(recovered.status,200);assert.equal(calls,3);
+  const success=await state.fetch(selected,'/test',{},async()=>{calls++;return new Response('{}')});
+  assert.equal(success.status,200);assert.equal(calls,1);
   calls=0;
   const limited=await state.fetch(selected,'/test',{},async()=>{calls++;return new Response(JSON.stringify({code:'RATE_LIMIT'}),{status:429})});
   assert.equal(limited.status,429);assert.equal(calls,1);
   calls=0;
-  const busy=await state.fetch(selected,'/test',{},async()=>{calls++;return busyResponse()});
-  assert.equal(busy.status,429);assert.equal(calls,7);
+  const busy=await state.fetch(selected,'/test',{},async()=>{calls++;return busyResponse('1')});
+  assert.equal(busy.status,429);assert.equal(calls,1);
 });
-test('closing/replacing the player aborts a pending busy retry', async () => {
-  const state=new PlaybackRequestState();const selected=state.begin();let calls=0;
-  const pending=state.fetch(selected,'/test',{},async()=>{calls++;return busyResponse('1')});
-  setTimeout(()=>state.begin(),30);
+test('closing/replacing the player cancels an in-flight playback response', async () => {
+  const state=new PlaybackRequestState();const selected=state.begin();let resolveFetch;let calls=0;
+  const pending=state.fetch(selected,'/test',{},async()=>{calls++;return new Promise(resolve=>{resolveFetch=resolve})});
+  state.begin();
+  resolveFetch(new Response('{}'));
   await assert.rejects(pending,{name:'AbortError'});assert.equal(calls,1);
 });
